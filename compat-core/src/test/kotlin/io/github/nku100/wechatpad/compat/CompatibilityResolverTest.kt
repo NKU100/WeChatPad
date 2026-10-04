@@ -23,6 +23,34 @@ class CompatibilityResolverTest {
     }
 
     @Test
+    fun rejectsAProfileWithNoHooks() {
+        val result = resolve(target = target(hooks = emptyList()))
+
+        assertRejected(result, CompatibilityStatus.INVALID_PROFILE)
+    }
+
+    @Test
+    fun rejectsAProfileMissingTheTabletHook() {
+        val result = resolve(target = target(hooks = listOf(LOGIN_RULE)))
+
+        assertRejected(result, CompatibilityStatus.INVALID_PROFILE)
+    }
+
+    @Test
+    fun rejectsAProfileMissingTheLoginHook() {
+        val result = resolve(target = target(hooks = listOf(TABLET_RULE)))
+
+        assertRejected(result, CompatibilityStatus.INVALID_PROFILE)
+    }
+
+    @Test
+    fun rejectsAProfileWithDuplicateHookIds() {
+        val result = resolve(target = target(hooks = listOf(TABLET_RULE, TABLET_RULE, LOGIN_RULE)))
+
+        assertRejected(result, CompatibilityStatus.INVALID_PROFILE)
+    }
+
+    @Test
     fun rejectsMissingAnchorsWithoutKeepingPartialHooks() {
         val result = resolve(facts = validFacts().dropLast(1))
 

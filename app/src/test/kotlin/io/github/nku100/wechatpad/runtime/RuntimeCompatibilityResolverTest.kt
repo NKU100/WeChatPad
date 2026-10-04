@@ -96,6 +96,44 @@ class RuntimeCompatibilityResolverTest {
     }
 
     @Test
+    fun recomputesCacheEntriesFromThePreviousResolverVersion() = withFixture { directory, apk ->
+        val cache = RuntimeResolutionCache(directory.resolve("cache").toFile())
+        cache.write(
+            "a".repeat(64),
+            cacheKey().copy(resolverVersion = 1),
+            io.github.nku100.wechatpad.compat.CompatibilityResult(
+                status = CompatibilityStatus.COMPATIBLE,
+                reason = "previous resolver version",
+                resolvedDescriptors = mapOf(
+                    "tablet" to TABLET_METHOD,
+                    "login" to LOGIN_METHOD,
+                ),
+            ),
+        )
+        var hashCalls = 0
+        var scanCalls = 0
+        val resolver = RuntimeCompatibilityResolver(
+            targets = listOf(target()),
+            cache = cache,
+            hashApk = {
+                hashCalls++
+                APK_SHA256
+            },
+            readFacts = { _, _ ->
+                scanCalls++
+                facts()
+            },
+        )
+
+        val result = resolver.resolve(installedBuild(directory, apk))
+
+        assertEquals(CompatibilityStatus.COMPATIBLE, result.result.status)
+        assertFalse(result.cacheHit)
+        assertEquals(1, hashCalls)
+        assertEquals(1, scanCalls)
+    }
+
+    @Test
     fun doesNotUseProfilesWithoutStaticOrRuntimeVerification() = withFixture { directory, apk ->
         val resolver = RuntimeCompatibilityResolver(
             targets = listOf(target().copy(verificationStatus = VerificationStatus.UNVERIFIED)),

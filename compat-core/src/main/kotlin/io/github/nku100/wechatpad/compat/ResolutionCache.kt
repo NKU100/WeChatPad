@@ -18,8 +18,8 @@ data class ResolutionCacheKey(
     val featureRulesVersion: Int,
 )
 
-// Bump this when shared method-fact matching changes in a way that can affect compatibility results.
-const val COMPATIBILITY_RESOLVER_VERSION = 1
+// Bump this when shared compatibility resolution behavior changes.
+const val COMPATIBILITY_RESOLVER_VERSION = 2
 
 @Serializable
 data class ResolutionCacheEntry(

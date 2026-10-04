@@ -1,6 +1,8 @@
 package io.github.nku100.wechatpad.compat
 
 object CompatibilityResolver {
+    private val requiredHookIds = setOf("tablet", "login")
+
     fun resolve(
         identity: BuildIdentity,
         verification: IdentityVerification,
@@ -37,6 +39,14 @@ object CompatibilityResolver {
                     return rejected(CompatibilityStatus.IDENTITY_MISMATCH, "APK SHA-256 does not match the target")
                 }
             }
+        }
+
+        val hookIds = target.hooks.map(HookRule::id)
+        if (hookIds.size != requiredHookIds.size || hookIds.toSet() != requiredHookIds) {
+            return rejected(
+                CompatibilityStatus.INVALID_PROFILE,
+                "Profile must define exactly one 'tablet' hook and one 'login' hook",
+            )
         }
 
         val resolved = linkedMapOf<String, String>()
