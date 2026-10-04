@@ -1,0 +1,17 @@
+[versions]
+agp = "9.4.0"
+kotlin = "2.4.20"
+libxposed = "102.0.0"
+smali = "3.0.10"
+serialization = "1.11.0"
+
+[plugins]
+android-app = { id = "com.android.application", version.ref = "agp" }
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+
+[libraries]
+kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
+libxposed-api = { group = "io.github.libxposed", name = "api", version.ref = "libxposed" }
+smali-dexlib2 = { group = "com.android.tools.smali", name = "smali-dexlib2", version.ref = "smali" }
+kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serialization" }

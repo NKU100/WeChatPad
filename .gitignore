@@ -1,0 +1,17 @@
+.gradle/
+.idea/
+.kotlin/
+.superpowers/
+build/
+**/build/
+local.properties
+.DS_Store
+
+# Official test APKs and generated analysis output stay local.
+work/apks/
+work/analysis/
+
+# Signing material
+*.jks
+*.keystore
+keystore.properties
