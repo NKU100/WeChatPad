@@ -17,6 +17,14 @@ class ResolutionCacheTest {
     }
 
     @Test
+    fun returnsACompatibleEntryForRuntimeFingerprintLookup() = withCache { cache, key, _ ->
+        val result = compatibleResult()
+        cache.write(key, result)
+
+        assertEquals(ResolutionCacheEntry(key, result), cache.readAnyCompatible())
+    }
+
+    @Test
     fun missesWhenAnyBuildOrRuleIdentityChanges() = withCache { cache, key, _ ->
         cache.write(key, compatibleResult())
 
@@ -24,6 +32,7 @@ class ResolutionCacheTest {
             key.copy(apkSha256 = DIFFERENT_SHA256),
             key.copy(signerSha256 = DIFFERENT_SHA256),
             key.copy(versionCode = key.versionCode + 1),
+            key.copy(resolverVersion = key.resolverVersion + 1),
             key.copy(featureRulesVersion = key.featureRulesVersion + 1),
         )
         changedKeys.forEach { changedKey ->
@@ -64,6 +73,7 @@ class ResolutionCacheTest {
                     apkSha256 = "5feb100337981467fd257c3ad66bb171f54a69d2579b2ecc70d5a628db8e7282",
                     signerSha256 = "0fe4ff85c215918396dadc7cd8ce6963339af33d37751a56e54c7206b63a3c7c",
                     versionCode = 3200,
+                    resolverVersion = COMPATIBILITY_RESOLVER_VERSION,
                     featureRulesVersion = 1,
                 ),
                 file,

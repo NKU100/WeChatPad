@@ -30,6 +30,7 @@
 - 多 DEX APK 或 DEX 指令中有非字符串引用时不能漏报或崩溃；由 Task 3 的多 DEX 与混合引用测试覆盖。
 - 第二个 Hook 解析或注册失败时不能留下第一个 Hook；由 Task 4 的事务回滚测试覆盖。
 - APK 更新、规则版本变化或损坏缓存后不能复用旧目标；由 Task 2 的缓存键测试和 Task 4 的更新后 AVD 冒烟覆盖。
+- 未静态验证的 profile 或描述符与 profile 不一致的缓存不能启用 Hook；由 Task 4 的运行时解析测试覆盖。
 
 ---
 
@@ -102,7 +103,7 @@ git commit -m "build: scaffold WeChatPad module"
 - `CompatibilityTarget(identity: BuildIdentity, featureRulesVersion: Int, hooks: List<HookRule>)`.
 - `IdentityVerification` has `STATIC_APK` and `INSTALLED_PACKAGE` modes; the latter trusts exact package/version/ABI/signer evidence from Android PackageManager and compares an APK hash whenever one is available.
 - `CompatibilityResolver.resolve(identity: BuildIdentity, verification: IdentityVerification, targets: List<CompatibilityTarget>, facts: List<DexMethodFact>): CompatibilityResult`.
-- `ResolutionCacheKey(apkSha256: String, signerSha256: String, versionCode: Long, featureRulesVersion: Int)`; cache reads with malformed data or a nonmatching key return a miss.
+- `ResolutionCacheKey(apkSha256: String, signerSha256: String, versionCode: Long, resolverVersion: Int, featureRulesVersion: Int)`; cache reads with malformed data or a nonmatching key return a miss. Bump `COMPATIBILITY_RESOLVER_VERSION` when shared matching behavior changes.
 - `CompatibilityResult` exposes a typed status, a diagnostic reason, and resolved descriptors keyed by hook id. A target is compatible only when both required hook ids each resolve to exactly one matching method.
 
 - [ ] **Step 1: Write resolver tests for the accepted and rejected inputs**
@@ -190,52 +191,61 @@ git commit -m "feat: verify WeChat compatibility profiles"
 
 **Files:**
 - Create: `app/src/main/kotlin/io/github/nku100/wechatpad/runtime/InstalledBuildIdentityReader.kt`
+- Create: `app/src/main/kotlin/io/github/nku100/wechatpad/runtime/HookCall.kt`
 - Create: `app/src/main/kotlin/io/github/nku100/wechatpad/runtime/TinkerClassLoaderBridge.kt`
+- Create: `app/src/main/kotlin/io/github/nku100/wechatpad/runtime/LibXposedHookRegistrar.kt`
 - Create: `app/src/main/kotlin/io/github/nku100/wechatpad/runtime/TargetMethodResolver.kt`
 - Create: `app/src/main/kotlin/io/github/nku100/wechatpad/runtime/HookCallbacks.kt`
 - Create: `app/src/main/kotlin/io/github/nku100/wechatpad/runtime/HookInstaller.kt`
+- Create: `app/src/main/kotlin/io/github/nku100/wechatpad/runtime/RuntimeCompatibilityResolver.kt`
 - Create: `app/src/main/kotlin/io/github/nku100/wechatpad/runtime/RuntimeResolutionCache.kt`
 - Create: `app/src/test/kotlin/io/github/nku100/wechatpad/runtime/TargetMethodResolverTest.kt`
 - Create: `app/src/test/kotlin/io/github/nku100/wechatpad/runtime/TinkerClassLoaderBridgeTest.kt`
 - Create: `app/src/test/kotlin/io/github/nku100/wechatpad/runtime/HookCallbacksTest.kt`
 - Create: `app/src/test/kotlin/io/github/nku100/wechatpad/runtime/HookInstallerTest.kt`
+- Create: `app/src/test/kotlin/io/github/nku100/wechatpad/runtime/InstalledBuildIdentityReaderTest.kt`
+- Create: `app/src/test/kotlin/io/github/nku100/wechatpad/runtime/RuntimeCompatibilityResolverTest.kt`
+- Create: `app/src/test/kotlin/io/github/nku100/wechatpad/runtime/RuntimeResolutionCacheTest.kt`
+- Modify: `compat-core/src/main/kotlin/io/github/nku100/wechatpad/compat/ResolutionCache.kt`
+- Modify: `compat-core/src/test/kotlin/io/github/nku100/wechatpad/compat/ResolutionCacheTest.kt`
 - Modify: `app/src/main/kotlin/io/github/nku100/wechatpad/WeChatPadModule.kt`
 - Modify: `app/build.gradle.kts`
 
 **Interfaces:**
-- `InstalledBuild(identity: BuildIdentity, apkFiles: List<File>, installFingerprint: String)` carries Android package identity, installed APK paths, and a quick cache invalidation fingerprint.
-- `InstalledBuildIdentityReader.read(packageName: String): InstalledBuild` reads package/version/signer, source APK and split APK paths, file size/mtime, and install fingerprint from Android package metadata; it does not hash the APK on the cache-hit path.
-- `TinkerClassLoaderBridge.install(classLoader: ClassLoader, onReady: (ClassLoader) -> Unit): HookHandle` hooks `TinkerApplication.onBaseContextAttached(Context, long, long)` after the call and supplies the post-Tinker classloader.
+- `InstalledBuild(identity: BuildIdentity, apkFiles: List<File>, installFingerprint: String, dataDirectory: File)` carries the observed package name and ABI, installed APK paths, private data directory, and a quick cache invalidation fingerprint.
+- `InstalledBuildIdentityReader.read(applicationInfo: ApplicationInfo): InstalledBuild` reads package name, APK/split paths, ABI, UID, file size/mtime, and data directory without hashing APK contents.
+- API 102's package-loaded callback runs before `Application` creation and only supplies `ApplicationInfo`, which has no version or signer data. On a cache miss, hash the installed base APK and match its exact hash to a registered profile; combine that profile's version and signer with the observed package name and ABI before calling the shared resolver. On a cache hit, validate the stored key against one registered profile and recheck package name, ABI, and install fingerprint before using the result.
+- `TinkerClassLoaderBridge.install(classLoader: ClassLoader, onReady: (ClassLoader) -> Unit): HookRegistration` hooks `TinkerApplication.onBaseContextAttached(Context, long, long)` after the call and supplies the post-Tinker classloader.
 - `TargetMethodResolver.resolve(classLoader: ClassLoader, descriptor: String): Method` converts the resolved DEX descriptor to a reflected method and rejects missing or signature-mismatched methods.
 - `HookInstaller.install(tabletMethod: Method, loginMethod: Method): InstallOutcome` registers both API 102 hooks; if either registration fails, it removes any hook already installed and returns failure.
 - Hook callbacks use the action ids already present in `HookRule`; tablet behavior matches the reference commit’s call-stack exception and login behavior only changes `GONE` to `VISIBLE`.
 - The runtime reads `compatibility/targets.json` from the APK asset packaged from the root file; it does not maintain a second profile copy.
 
-- [ ] **Step 1: Write callback, method-descriptor, bootstrap, and install-rollback tests**
+- [x] **Step 1: Write callback, method-descriptor, bootstrap, identity, cache, and install-rollback tests**
 
 Cover object/primitive/array descriptor conversion, missing method rejection, Tinker post-attach classloader delivery, tablet result for chat/non-chat stacks, login visibility for `GONE`/`VISIBLE`/`INVISIBLE`, first-hook failure, second-hook failure with first-hook removal, and successful two-hook installation.
 
-- [ ] **Step 2: Run runtime unit tests to verify they fail**
+- [x] **Step 2: Run runtime unit tests to verify they fail**
 
 Run: `./gradlew :app:testDebugUnitTest --tests '*TargetMethodResolverTest' --tests '*TinkerClassLoaderBridgeTest' --tests '*HookCallbacksTest' --tests '*HookInstallerTest'`
 Expected: FAIL because runtime resolvers and installer are absent.
 
-- [ ] **Step 3: Implement package identity, shared DEX resolution, and cache loading**
+- [x] **Step 3: Implement package identity, shared DEX resolution, and cache loading**
 
-On the `com.tencent.mm` main-process callback, reject other processes or a non-WeChat package; the `minApiVersion=102` metadata prevents frameworks without API 102 from loading this entry point. Read the same target JSON and use package version, signer, APK file metadata, and feature-rule version for a fast cache lookup. On a miss, compute the APK SHA-256, run `DexFactReader`, and call the same `CompatibilityResolver` as the checker in `INSTALLED_PACKAGE` mode. Store successful results under WeChat’s private files using a key containing the registered APK SHA-256 and feature-rule version, indexed by the install fingerprint. Recompute on APK identity or feature-rule changes and treat invalid cache data as a miss.
+On the `com.tencent.mm` main-process callback, reject other processes or a non-WeChat package; the `minApiVersion=102` metadata prevents frameworks without API 102 from loading this entry point. Read the same target JSON and use package name, ABI, APK file metadata, resolver version, and feature-rule version to locate a cache entry indexed by the install fingerprint. Validate the serialized resolution key against one registered profile before using it. On a miss, compute the installed base APK SHA-256, select the exact statically or locally runtime-verified profile by APK hash, run `DexFactReader`, and call the same `CompatibilityResolver` as the checker in `INSTALLED_PACKAGE` mode. Store successful results under WeChat’s private files using the registered APK SHA-256, signer, version code, resolver version, and feature-rule version. Recompute on APK identity or either rules version changing and treat invalid cache data as a miss.
 
-- [ ] **Step 4: Resolve both runtime methods before installing either hook**
+- [x] **Step 4: Resolve both runtime methods before installing either hook**
 
 After package-manager identity and shared DEX resolution succeed, install the temporary Tinker bootstrap hook. Once `onBaseContextAttached` returns, resolve both descriptors through Tinker’s actual classloader, then install the tablet and login hooks. Remove the temporary bootstrap hook on every exit path; roll back the tablet hook if login-hook registration fails. Unsupported builds never receive even the bootstrap hook. Log build identity, compatibility status, resolved descriptors, cache hit/miss, and failure reason without logging account data.
 
-- [ ] **Step 5: Implement the two callback behaviors and run unit tests**
+- [x] **Step 5: Implement the two callback behaviors and run unit tests**
 
 For tablet detection, proceed through the original call, then return `false` when the stack contains `com.tencent.mm.pluginsdk.ui.chat`; otherwise return `true`. For the login visibility hook, inspect argument 0 and set its visibility to `VISIBLE` only when it is `GONE`. This preserves the behavior in [WeChatTablet commit 7f53c39](https://github.com/Xposed-Modules-Repo/top.hookvip.wxtablet/commit/7f53c39ca271454c699a39f48174231e5bde4b7e) and its [hook callback](https://github.com/Xposed-Modules-Repo/top.hookvip.wxtablet/blob/92cc10eab9cb56afcb3de884f6966a700aa6d159/app/src/main/java/top/hookvip/wxtablet/entry/TabletHooker.kt).
 
-Run: `./gradlew :app:testDebugUnitTest :app:assembleDebug`
+Run: `./gradlew :compat-core:test :compat-checker:test :app:testDebugUnitTest :app:assembleDebug verifyModuleMetadata`
 Expected: PASS; the debug APK contains one profile resource, the API 102 entry, and no WeChatTablet/DexKit/YukiHookAPI artifacts.
 
-- [ ] **Step 6: Commit the runtime implementation**
+- [x] **Step 6: Commit the runtime implementation**
 
 ```bash
 git add app compat-core

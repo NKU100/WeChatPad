@@ -1,9 +1,34 @@
 import java.io.File
 import java.util.Properties
 import java.util.zip.ZipFile
+import org.gradle.api.DefaultTask
+import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.file.RegularFileProperty
+import org.gradle.api.tasks.InputFile
+import org.gradle.api.tasks.OutputDirectory
+import org.gradle.api.tasks.PathSensitive
+import org.gradle.api.tasks.PathSensitivity
+import org.gradle.api.tasks.TaskAction
+import org.gradle.api.tasks.testing.Test
 
 plugins {
     alias(libs.plugins.android.app)
+}
+
+abstract class GenerateCompatibilityTargets : DefaultTask() {
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val sourceFile: RegularFileProperty
+
+    @get:OutputDirectory
+    abstract val outputDirectory: DirectoryProperty
+
+    @TaskAction
+    fun generate() {
+        val destination = outputDirectory.file("compatibility/targets.json").get().asFile
+        destination.parentFile.mkdirs()
+        sourceFile.get().asFile.copyTo(destination, overwrite = true)
+    }
 }
 
 android {
@@ -32,10 +57,32 @@ android {
     }
 }
 
+androidComponents {
+    onVariants(selector().all()) { variant ->
+        val task = tasks.register<GenerateCompatibilityTargets>(
+            "generate${variant.name.replaceFirstChar(Char::uppercase)}CompatibilityTargets",
+        ) {
+            sourceFile.set(rootProject.layout.projectDirectory.file("compatibility/targets.json"))
+            outputDirectory.set(layout.buildDirectory.dir("generated/compatibility-assets/${variant.name}"))
+        }
+        checkNotNull(variant.sources.assets).addGeneratedSourceDirectory(
+            task,
+            GenerateCompatibilityTargets::outputDirectory,
+        )
+    }
+}
+
 dependencies {
     compileOnly(libs.libxposed.api)
     implementation(project(":compat-core"))
+    implementation(libs.kotlinx.serialization.json)
+    testImplementation(libs.junit.jupiter)
     testImplementation(kotlin("test"))
+    testRuntimeOnly(libs.junit.platform.launcher)
+}
+
+tasks.withType<Test>().configureEach {
+    useJUnitPlatform()
 }
 
 tasks.register("verifyModuleMetadata") {
@@ -95,6 +142,18 @@ tasks.register("verifyModuleMetadata") {
             }
             check(entryClasses == listOf("io.github.nku100.wechatpad.WeChatPadModule")) {
                 "Unexpected module entry point: $entryClasses"
+            }
+
+            val targetEntries = archive.entries().asSequence()
+                .filter { it.name == "assets/compatibility/targets.json" }
+                .toList()
+            check(targetEntries.size == 1) {
+                "Expected exactly one packaged compatibility profile file, found ${targetEntries.size}"
+            }
+            val packagedTargets = archive.getInputStream(targetEntries.single()).use { it.readBytes() }
+            val sourceTargets = rootProject.file("compatibility/targets.json").readBytes()
+            check(packagedTargets.contentEquals(sourceTargets)) {
+                "Packaged compatibility profiles differ from compatibility/targets.json"
             }
         }
     }

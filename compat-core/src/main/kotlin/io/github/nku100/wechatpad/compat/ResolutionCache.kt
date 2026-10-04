@@ -14,8 +14,12 @@ data class ResolutionCacheKey(
     val apkSha256: String,
     val signerSha256: String,
     val versionCode: Long,
+    val resolverVersion: Int,
     val featureRulesVersion: Int,
 )
+
+// Bump this when shared method-fact matching changes in a way that can affect compatibility results.
+const val COMPATIBILITY_RESOLVER_VERSION = 1
 
 @Serializable
 data class ResolutionCacheEntry(
@@ -26,13 +30,14 @@ data class ResolutionCacheEntry(
 class ResolutionCache(private val file: File) {
     private val json = Json
 
-    fun read(key: ResolutionCacheKey): ResolutionCacheEntry? {
+    fun read(key: ResolutionCacheKey): ResolutionCacheEntry? =
+        readAnyCompatible()?.takeIf { it.key == key }
+
+    fun readAnyCompatible(): ResolutionCacheEntry? {
         if (!file.isFile) return null
         return try {
             val entry = json.decodeFromString<ResolutionCacheEntry>(file.readText(StandardCharsets.UTF_8))
-            entry.takeIf {
-                it.key == key && it.result.status == CompatibilityStatus.COMPATIBLE
-            }
+            entry.takeIf { it.result.status == CompatibilityStatus.COMPATIBLE }
         } catch (_: SerializationException) {
             null
         } catch (_: IllegalArgumentException) {
