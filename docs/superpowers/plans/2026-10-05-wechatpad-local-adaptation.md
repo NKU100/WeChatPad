@@ -252,7 +252,7 @@ git add app compat-core
 git commit -m "feat: add WeChat tablet login hooks"
 ```
 
-### Task 5: Repair and run the isolated local AVD smoke matrix
+### Task 5: Run the isolated local AVD smoke matrix
 
 **Files:**
 - Modify: dedicated local AVD configuration only if required to use an installed Android 37.2 Google APIs ARM64 system image with 16 KB pages.
@@ -265,27 +265,27 @@ git commit -m "feat: add WeChat tablet login hooks"
 - Use an official LSPosed release that supports libxposed API 102 and record its version in the validation report.
 - A successful smoke changes the target status from `static-verified` to `runtime-verified-local`; a failed smoke leaves it static-only and records the observed failure.
 
-- [ ] **Step 1: Configure the dedicated AVD and boot it visibly**
+- [x] **Step 1: Configure the dedicated AVD and boot it visibly**
 
 Use an installed Android 37.2 Google APIs ARM64 system image with 16 KB pages. Create a separate AVD for this validation, configure the required root-capable setup, and confirm it boots visibly as Android 17 / API 37. Do not change unrelated AVDs or issue commands to unrelated running emulators.
 
-- [ ] **Step 2: Verify official LSPosed and the no-module baseline**
+- [x] **Step 2: Verify official LSPosed and the no-module baseline**
 
-Confirm the selected official LSPosed release is active and API 102 is available. Install WeChat 8.0.69 with WeChatPad disabled; launch it in the visible window and record the baseline login page and available login options.
+Confirm the installed official LSPosed release is active and API 102 is available. Disable the WeChat scope for other WeChat modules and disable WeChatPad; launch each target build in the visible window and record the baseline login page and available login options.
 
-- [ ] **Step 3: Enable the module and smoke 8.0.69**
+- [x] **Step 3: Enable the module and smoke 8.0.69**
 
 Enable `io.github.nku100.wechatpad` for `com.tencent.mm`, force-stop/relaunch WeChat, verify the LSPosed hook-install log, confirm the tablet login entry is visible, and open its QR login page. Do not scan the QR code or sign in.
 
-- [ ] **Step 4: Repeat baseline and hooked smoke for 8.0.79**
+- [x] **Step 4: Repeat baseline and hooked smoke for 8.0.79**
 
-Replace the app with the saved 8.0.79 APK, confirm the baseline, then repeat the hooked login-entry and QR-page checks. Keep the emulator window visible throughout.
+Replace the app with the saved 8.0.79 APK, confirm the baseline, then repeat the hooked login-entry and QR-page checks. Also update from 8.0.69 to 8.0.79 with WeChatPad enabled and verify cache invalidation followed by a cache hit on a subsequent cold start. Keep the emulator window visible throughout.
 
-- [ ] **Step 5: Record evidence and update statuses**
+- [x] **Step 5: Record evidence and update statuses**
 
 Record both WeChat version codes, AVD image, official LSPosed version/API, baseline/hooked results, and any failure logs in `docs/validation/wechatpad-local-smoke.md`. Mark a target `runtime-verified-local` only when both its baseline and hooked smoke pass.
 
-- [ ] **Step 6: Commit the local validation record**
+- [x] **Step 6: Commit the local validation record**
 
 ```bash
 git add compatibility/targets.json docs/validation/wechatpad-local-smoke.md docs/superpowers/specs/2026-10-04-wechatpad-design.md
