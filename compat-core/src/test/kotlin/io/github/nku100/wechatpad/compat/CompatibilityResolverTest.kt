@@ -131,6 +131,8 @@ class CompatibilityResolverTest {
 
         assertEquals(1, targets.size)
         assertEquals("8.0.69", targets.single().identity.versionName)
+        assertEquals("https://dldir1v6.qq.com/weixin/android/weixin8069android3040_0x2800455a_arm64.apk", targets.single().sourceUrl)
+        assertEquals(VerificationStatus.STATIC_VERIFIED, targets.single().verificationStatus)
         assertEquals(listOf("tablet", "login"), targets.single().hooks.map(HookRule::id))
     }
 

@@ -8,6 +8,8 @@
       "apkSha256": "e4da5809f2b3305e375db38897a4082085adc6b51182fa807813c4dda1c3a948",
       "signerSha256": "0fe4ff85c215918396dadc7cd8ce6963339af33d37751a56e54c7206b63a3c7c"
     },
+    "sourceUrl": "https://dldir1v6.qq.com/weixin/android/weixin8069android3040_0x2800455a_arm64.apk",
+    "verificationStatus": "static-verified",
     "featureRulesVersion": 1,
     "hooks": [
       {
