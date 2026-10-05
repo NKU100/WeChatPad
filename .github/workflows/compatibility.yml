@@ -15,6 +15,9 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v7
 
+      - name: Test official candidate discovery and cache validation
+        run: python3 -m unittest scripts.test_discover_latest_wechat
+
       - name: Validate target manifest and create matrix
         id: targets
         shell: bash
@@ -167,4 +170,106 @@ jobs:
 
       - name: Mark checker failure
         if: steps.compatibility.outcome == 'failure'
+        run: exit 1
+
+  latest:
+    name: Check latest official APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+
+      - name: Install Android SDK packages
+        run: sdkmanager 'platforms;android-37.2' 'build-tools;37.0.0'
+
+      - name: Test shared compatibility core
+        run: ./gradlew --no-daemon :compat-core:test :compat-checker:test
+
+      - name: Prepare latest candidate diagnostic
+        run: |
+          mkdir -p compatibility-report
+          printf '# Latest official WeChat ARM64 compatibility check\n\n' \
+            > compatibility-report/latest-official.md
+
+      - name: Discover latest official ARM64 APK
+        id: discover
+        run: |
+          python3 -m scripts.ci.discover_latest_wechat \
+            --targets compatibility/targets.json \
+            --github-output "$GITHUB_OUTPUT" \
+            --report compatibility-report/latest-official.md
+
+      - name: Prepare latest candidate cache
+        env:
+          WECHAT_APK_CACHE_DIR: ${{ steps.discover.outputs.cache_dir }}
+        run: mkdir -p "$WECHAT_APK_CACHE_DIR"
+
+      - name: Restore latest candidate by official URL
+        uses: actions/cache@v6
+        with:
+          path: ${{ steps.discover.outputs.cache_dir }}
+          key: ${{ steps.discover.outputs.cache_key }}
+
+      - name: Download and verify latest candidate
+        id: candidate
+        env:
+          WECHAT_APK_URL: ${{ steps.discover.outputs.source_url }}
+          WECHAT_APK_CACHE_DIR: ${{ steps.discover.outputs.cache_dir }}
+          WECHAT_APK_EXPECTED_SHA256: ${{ steps.discover.outputs.expected_sha256 }}
+        run: |
+          python3 -m scripts.ci.fetch_latest_wechat_apk \
+            --url "$WECHAT_APK_URL" \
+            --cache-dir "$WECHAT_APK_CACHE_DIR" \
+            --expected-sha256 "$WECHAT_APK_EXPECTED_SHA256" \
+            --github-output "$GITHUB_OUTPUT" \
+            --report compatibility-report/latest-official.md
+
+      - name: Run shared compatibility checker on latest candidate
+        id: latest-compatibility
+        continue-on-error: true
+        env:
+          WECHAT_APK_PATH: ${{ steps.candidate.outputs.apk_path }}
+        shell: bash
+        run: |
+          set -uo pipefail
+          printf '\n## Shared compat-core result\n\n' >> compatibility-report/latest-official.md
+
+          set +e
+          ./gradlew --no-daemon :compat-checker:run \
+            --args="check --targets compatibility/targets.json --apk $WECHAT_APK_PATH" \
+            2>&1 | tee -a compatibility-report/latest-official.md
+          checker_status=${PIPESTATUS[0]}
+          set -e
+
+          if [[ "$checker_status" -eq 0 ]]; then
+            printf '\nStatic compatibility check passed.\n' >> compatibility-report/latest-official.md
+          else
+            printf '\nStatic compatibility check failed with exit code %s.\n' \
+              "$checker_status" >> compatibility-report/latest-official.md
+          fi
+          exit "$checker_status"
+
+      - name: Upload latest candidate diagnostic
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: wechatpad-latest-official-candidate
+          path: compatibility-report/latest-official.md
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Mark latest candidate checker failure
+        if: steps.latest-compatibility.outcome == 'failure'
         run: exit 1

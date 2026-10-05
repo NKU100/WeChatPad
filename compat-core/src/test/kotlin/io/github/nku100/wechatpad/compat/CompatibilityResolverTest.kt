@@ -137,6 +137,48 @@ class CompatibilityResolverTest {
     }
 
     @Test
+    fun reportsAnUnregisteredBuildAfterItsTrustedIdentityMatches() {
+        val identity = REGISTERED_IDENTITY.copy(versionName = "8.0.80", versionCode = 3220)
+        val result = resolveCandidate(identity)
+
+        assertEquals(CompatibilityStatus.UNKNOWN_BUILD, result.status)
+        assertTrue(result.reason.contains("signer"))
+    }
+
+    @Test
+    fun rejectsAnUnregisteredCandidateSignedByAnotherCertificate() {
+        val identity = REGISTERED_IDENTITY.copy(
+            versionName = "8.0.80",
+            versionCode = 3220,
+            signerSha256 = WRONG_SHA256,
+        )
+
+        assertRejected(resolveCandidate(identity), CompatibilityStatus.IDENTITY_MISMATCH)
+    }
+
+    @Test
+    fun rejectsAnUnregisteredCandidateWithAnotherPackage() {
+        val identity = REGISTERED_IDENTITY.copy(
+            packageName = "com.example.other",
+            versionName = "8.0.80",
+            versionCode = 3220,
+        )
+
+        assertRejected(resolveCandidate(identity), CompatibilityStatus.IDENTITY_MISMATCH)
+    }
+
+    @Test
+    fun rejectsAnUnregisteredCandidateWithAnotherAbi() {
+        val identity = REGISTERED_IDENTITY.copy(
+            abi = "armeabi-v7a",
+            versionName = "8.0.80",
+            versionCode = 3220,
+        )
+
+        assertRejected(resolveCandidate(identity), CompatibilityStatus.IDENTITY_MISMATCH)
+    }
+
+    @Test
     fun rejectsTheOldLenovoAnchorCollisionEvenWhenItsMethodShapeMatches() {
         val obsoleteRule = TABLET_RULE.copy(
             stringAnchor = "Lenovo TB-9707F",
@@ -173,6 +215,16 @@ class CompatibilityResolverTest {
         identity = identity,
         verification = verification,
         targets = listOf(target),
+        facts = facts,
+    )
+
+    private fun resolveCandidate(
+        identity: BuildIdentity,
+        targets: List<CompatibilityTarget> = listOf(target()),
+        facts: List<DexMethodFact> = validFacts(),
+    ): CompatibilityResult = CompatibilityResolver.resolveStaticCandidate(
+        identity = identity,
+        targets = targets,
         facts = facts,
     )
 

@@ -4,7 +4,6 @@ import io.github.nku100.wechatpad.compat.CompatibilityResolver
 import io.github.nku100.wechatpad.compat.CompatibilityStatus
 import io.github.nku100.wechatpad.compat.CompatibilityTarget
 import io.github.nku100.wechatpad.compat.DexFactReader
-import io.github.nku100.wechatpad.compat.IdentityVerification
 import java.io.File
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
@@ -27,9 +26,8 @@ private fun checkCompatibility(arguments: CheckArguments) {
     val identity = ApkIdentityInspector().inspect(arguments.apk)
     val anchors = targets.flatMap { target -> target.hooks.map { it.stringAnchor } }.toSet()
     val facts = DexFactReader.scan(listOf(arguments.apk), anchors)
-    val result = CompatibilityResolver.resolve(
+    val result = CompatibilityResolver.resolveStaticCandidate(
         identity = identity,
-        verification = IdentityVerification.STATIC_APK,
         targets = targets,
         facts = facts,
     )

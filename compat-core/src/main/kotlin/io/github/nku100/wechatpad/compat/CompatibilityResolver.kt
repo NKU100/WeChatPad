@@ -15,10 +15,7 @@ object CompatibilityResolver {
         } ?: return rejected(CompatibilityStatus.UNKNOWN_BUILD, "No target registered for this WeChat version")
 
         val expectedIdentity = target.identity
-        if (identity.packageName != expectedIdentity.packageName ||
-            identity.abi != expectedIdentity.abi ||
-            !identity.signerSha256.equals(expectedIdentity.signerSha256, ignoreCase = true)
-        ) {
+        if (!matchesTrustedIdentity(identity, expectedIdentity)) {
             return rejected(CompatibilityStatus.IDENTITY_MISMATCH, "Package, ABI, or signer does not match the target")
         }
 
@@ -80,6 +77,45 @@ object CompatibilityResolver {
             resolvedDescriptors = resolved,
         )
     }
+
+    fun resolveStaticCandidate(
+        identity: BuildIdentity,
+        targets: List<CompatibilityTarget>,
+        facts: List<DexMethodFact>,
+    ): CompatibilityResult {
+        val matchingTargets = targets.filter {
+            it.identity.versionName == identity.versionName &&
+                it.identity.versionCode == identity.versionCode
+        }
+        if (matchingTargets.size > 1) {
+            return rejected(CompatibilityStatus.INVALID_PROFILE, "Multiple profiles register this WeChat version")
+        }
+        if (matchingTargets.size == 1) {
+            return resolve(identity, IdentityVerification.STATIC_APK, targets, facts)
+        }
+
+        val latestVersionCode = targets.maxOfOrNull { it.identity.versionCode }
+            ?: return rejected(CompatibilityStatus.UNKNOWN_BUILD, "No compatibility targets are registered")
+        val latestTargets = targets.filter { it.identity.versionCode == latestVersionCode }
+        val trustedIdentity = latestTargets.singleOrNull()?.identity
+            ?: return rejected(CompatibilityStatus.INVALID_PROFILE, "Newest compatibility target is ambiguous")
+        if (!matchesTrustedIdentity(identity, trustedIdentity)) {
+            return rejected(
+                CompatibilityStatus.IDENTITY_MISMATCH,
+                "Package, ABI, or signer does not match the newest registered WeChat build",
+            )
+        }
+
+        return rejected(
+            CompatibilityStatus.UNKNOWN_BUILD,
+            "No target is registered for this version; package, ABI, and signer match the newest registered build",
+        )
+    }
+
+    private fun matchesTrustedIdentity(identity: BuildIdentity, trustedIdentity: BuildIdentity): Boolean =
+        identity.packageName == trustedIdentity.packageName &&
+            identity.abi == trustedIdentity.abi &&
+            identity.signerSha256.equals(trustedIdentity.signerSha256, ignoreCase = true)
 
     private fun rejected(status: CompatibilityStatus, reason: String) =
         CompatibilityResult(status = status, reason = reason)
