@@ -15,6 +15,28 @@ plugins {
     alias(libs.plugins.android.app)
 }
 
+val signing = Properties().apply {
+    val file = rootProject.file("keystore.properties")
+    if (file.isFile) file.inputStream().use(::load)
+}
+
+fun signingValue(property: String, environment: String): String? =
+    signing.getProperty(property) ?: System.getenv(environment)
+
+val signingStorePath = signingValue("storeFile", "WECHATPAD_KEYSTORE")
+val signingStoreFile = signingStorePath?.let { path ->
+    File(path).let { if (it.isAbsolute) it else rootProject.file(path) }
+}
+val signingStorePassword = signingValue("storePassword", "WECHATPAD_KEYSTORE_PASSWORD")
+val signingKeyAlias = signingValue("keyAlias", "WECHATPAD_KEY_ALIAS")
+val signingKeyPassword = signingValue("keyPassword", "WECHATPAD_KEY_PASSWORD")
+val hasStableSigningKey = signingStoreFile?.isFile == true &&
+        signingStorePassword != null && signingKeyAlias != null && signingKeyPassword != null
+
+if (!hasStableSigningKey) {
+    logger.warn("WeChatPad signing key is not configured; using the default debug key")
+}
+
 abstract class GenerateCompatibilityTargets : DefaultTask() {
     @get:InputFile
     @get:PathSensitive(PathSensitivity.RELATIVE)
@@ -43,6 +65,25 @@ android {
         targetSdk = 37
         versionCode = 1
         versionName = "0.1.0"
+    }
+
+    signingConfigs {
+        if (hasStableSigningKey) {
+            create("stable") {
+                storeFile = signingStoreFile
+                storePassword = signingStorePassword
+                keyAlias = signingKeyAlias
+                keyPassword = signingKeyPassword
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            if (hasStableSigningKey) {
+                signingConfig = signingConfigs.getByName("stable")
+            }
+        }
     }
 
     compileOptions {
