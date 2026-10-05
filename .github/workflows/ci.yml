@@ -30,7 +30,7 @@ jobs:
       - name: Install project Android SDK packages
         run: sdkmanager 'platforms;android-37.2' 'build-tools;37.0.0'
 
-      - name: Build debug APK with stable signing key
+      - name: Build debug APK
         if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         shell: bash
         env:
@@ -41,10 +41,27 @@ jobs:
         run: |
           set -euo pipefail
 
-          [[ -n "$WECHATPAD_KEYSTORE_BASE64" ]] || { echo 'Missing WECHATPAD_KEYSTORE_BASE64' >&2; exit 1; }
-          [[ -n "$WECHATPAD_KEYSTORE_PASSWORD" ]] || { echo 'Missing WECHATPAD_KEYSTORE_PASSWORD' >&2; exit 1; }
-          [[ -n "$WECHATPAD_KEY_ALIAS" ]] || { echo 'Missing WECHATPAD_KEY_ALIAS' >&2; exit 1; }
-          [[ -n "$WECHATPAD_KEY_PASSWORD" ]] || { echo 'Missing WECHATPAD_KEY_PASSWORD' >&2; exit 1; }
+          configured_secrets=0
+          for value in \
+            "$WECHATPAD_KEYSTORE_BASE64" \
+            "$WECHATPAD_KEYSTORE_PASSWORD" \
+            "$WECHATPAD_KEY_ALIAS" \
+            "$WECHATPAD_KEY_PASSWORD"; do
+            if [[ -n "$value" ]]; then
+              configured_secrets=$((configured_secrets + 1))
+            fi
+          done
+
+          if [[ "$configured_secrets" -eq 0 ]]; then
+            echo '::warning::WeChatPad signing Secrets are not configured; using the runner debug key. Reinstall the module to update if the signer changes between runs.'
+            ./gradlew --no-daemon :app:assembleDebug
+            exit 0
+          fi
+
+          if [[ "$configured_secrets" -ne 4 ]]; then
+            echo 'Incomplete WeChatPad signing Secrets: configure all four Secrets or remove them all to use the runner debug key.' >&2
+            exit 1
+          fi
 
           keystore_path="$RUNNER_TEMP/wechatpad-signing.jks"
           printf '%s' "$WECHATPAD_KEYSTORE_BASE64" | base64 --decode > "$keystore_path"

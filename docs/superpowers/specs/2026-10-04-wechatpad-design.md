@@ -63,7 +63,7 @@ libxposed API 102 的 `onPackageLoaded` 在目标 `Application` 创建前执行�
 
 ### 构建 CI
 
-推送、Pull Request 和手动触发时构建模块 APK，并将 APK 作为 GitHub Actions artifact 提供下载。Pull Request 使用 runner 的临时 debug 签名；主分支的推送和手动构建使用专用于 WeChatPad 的稳定签名密钥，密钥通过 GitHub Actions Secrets 提供，不能提交到仓库。缺少主分支签名 Secrets 时构建失败，不退回临时密钥。此 workflow 不下载或检查微信 APK，不运行兼容检查，也不启动 AVD、不安装 Magisk/LSPosed。暂不启用定时构建。
+推送、Pull Request 和手动触发时构建模块 APK，并将 APK 作为 GitHub Actions artifact 提供下载。Pull Request 使用 runner 的临时 debug 签名；主分支的推送和手动构建在四项签名 Secrets 齐全时使用专用于 WeChatPad 的稳定密钥，密钥不能提交到仓库。四项 Secrets 全缺席时警告并退回 runner 的 debug 密钥；只配置了部分 Secrets 时构建失败。尚未配置稳定密钥期间，不同 runner 构建的签名可能不同，更新模块时需卸载旧版再安装。此 workflow 不下载或检查微信 APK，不运行兼容检查，也不启动 AVD、不安装 Magisk/LSPosed。暂不启用定时构建。
 
 ### 后续兼容检测 CI
 
