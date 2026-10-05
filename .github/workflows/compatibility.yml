@@ -1,0 +1,170 @@
+name: Check WeChat compatibility
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      targets: ${{ steps.targets.outputs.matrix }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Validate target manifest and create matrix
+        id: targets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          jq -e '
+            type == "array" and length > 0 and
+            all(.[];
+              .identity.packageName == "com.tencent.mm" and
+              ((.identity.versionName | type) == "string") and
+              (.identity.versionName | length > 0 and test("^[0-9.]+") and all(explode[]; . == 46 or (. >= 48 and . <= 57)) and (contains("..") | not) and (endswith(".") | not)) and
+              ((.identity.versionCode | type) == "number") and
+              (.identity.abi == "arm64-v8a") and
+              ((.identity.apkSha256 | type) == "string") and
+              (.identity.apkSha256 | length == 64 and test("^[A-Fa-f0-9]{64}")) and
+              ((.identity.signerSha256 | type) == "string") and
+              (.identity.signerSha256 | length == 64 and test("^[A-Fa-f0-9]{64}")) and
+              ((.sourceUrl | type) == "string") and
+              (.sourceUrl | startswith("https://dldir1v6.qq.com/weixin/android/") and endswith(".apk") and (split("/") | length == 6))
+            )
+          ' compatibility/targets.json >/dev/null
+
+          matrix="$(jq -c '[.[] | {
+            version_name: .identity.versionName,
+            version_code: .identity.versionCode,
+            sha256: (.identity.apkSha256 | ascii_downcase),
+            source_url: .sourceUrl
+          }]' compatibility/targets.json)"
+          printf 'matrix=%s\n' "$matrix" >> "$GITHUB_OUTPUT"
+
+  check:
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.prepare.outputs.targets) }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+
+      - name: Install Android SDK packages
+        run: sdkmanager 'platforms;android-37.2' 'build-tools;37.0.0'
+
+      - name: Prepare APK cache and diagnostic report
+        env:
+          WECHAT_VERSION: ${{ matrix.target.version_name }}
+          WECHAT_VERSION_CODE: ${{ matrix.target.version_code }}
+          WECHAT_APK_SHA256: ${{ matrix.target.sha256 }}
+        run: |
+          set -euo pipefail
+          mkdir -p .cache/wechat-apks compatibility-report
+          printf '# WeChat %s (%s) compatibility check\n\nExpected APK SHA-256: %s\n\n' \
+            "$WECHAT_VERSION" "$WECHAT_VERSION_CODE" "$WECHAT_APK_SHA256" \
+            > "compatibility-report/$WECHAT_VERSION.md"
+
+      - name: Restore APK by SHA-256
+        uses: actions/cache@v6
+        with:
+          path: .cache/wechat-apks/${{ matrix.target.sha256 }}.apk
+          key: wechatpad-apk-${{ matrix.target.sha256 }}
+
+      - name: Download and verify official APK
+        env:
+          WECHAT_VERSION: ${{ matrix.target.version_name }}
+          WECHAT_APK_SHA256: ${{ matrix.target.sha256 }}
+          WECHAT_APK_URL: ${{ matrix.target.source_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          apk_path=".cache/wechat-apks/$WECHAT_APK_SHA256.apk"
+          report="compatibility-report/$WECHAT_VERSION.md"
+          printf 'Source: %s\n\n' "$WECHAT_APK_URL" >> "$report"
+
+          if [[ -f "$apk_path" ]] && printf '%s  %s\n' "$WECHAT_APK_SHA256" "$apk_path" | sha256sum --check --status; then
+            echo 'APK cache hit; SHA-256 verified.' | tee -a "$report"
+            exit 0
+          fi
+
+          echo 'Downloading the APK from the Tencent CDN.' | tee -a "$report"
+          download_path="$RUNNER_TEMP/wechatpad-$WECHAT_APK_SHA256.apk"
+          if ! curl --fail --show-error --silent --location --retry 3 \
+            --connect-timeout 20 --max-time 600 \
+            --proto '=https' --proto-redir '=https' \
+            --output "$download_path" "$WECHAT_APK_URL"; then
+            echo 'Download failed.' | tee -a "$report"
+            exit 1
+          fi
+
+          if ! printf '%s  %s\n' "$WECHAT_APK_SHA256" "$download_path" | sha256sum --check --status; then
+            actual_sha256="$(sha256sum "$download_path" | cut -d ' ' -f 1)"
+            printf 'SHA-256 mismatch. Expected %s; received %s.\n' \
+              "$WECHAT_APK_SHA256" "$actual_sha256" | tee -a "$report"
+            exit 1
+          fi
+
+          install -m 0644 "$download_path" "$apk_path"
+          echo 'Downloaded APK SHA-256 verified and cached.' | tee -a "$report"
+
+      - name: Run shared compatibility checker
+        id: compatibility
+        continue-on-error: true
+        env:
+          WECHAT_VERSION: ${{ matrix.target.version_name }}
+          WECHAT_APK_SHA256: ${{ matrix.target.sha256 }}
+        shell: bash
+        run: |
+          set -uo pipefail
+
+          report="compatibility-report/$WECHAT_VERSION.md"
+          apk_path=".cache/wechat-apks/$WECHAT_APK_SHA256.apk"
+          printf '\n## Shared compat-core result\n\n' >> "$report"
+
+          set +e
+          ./gradlew --no-daemon :compat-checker:run \
+            --args="check --targets compatibility/targets.json --apk $apk_path" \
+            2>&1 | tee -a "$report"
+          checker_status=${PIPESTATUS[0]}
+          set -e
+
+          if [[ "$checker_status" -eq 0 ]]; then
+            printf '\nStatic compatibility check passed.\n' >> "$report"
+          else
+            printf '\nStatic compatibility check failed with exit code %s.\n' "$checker_status" >> "$report"
+          fi
+          exit "$checker_status"
+
+      - name: Upload compatibility diagnostic
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: wechatpad-compatibility-${{ matrix.target.version_name }}
+          path: compatibility-report/${{ matrix.target.version_name }}.md
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Mark checker failure
+        if: steps.compatibility.outcome == 'failure'
+        run: exit 1

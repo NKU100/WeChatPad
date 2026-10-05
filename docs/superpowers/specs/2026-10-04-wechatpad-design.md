@@ -67,9 +67,11 @@ libxposed API 102 的 `onPackageLoaded` 在目标 `Application` 创建前执行�
 
 ### 后续兼容检测 CI
 
-单独的兼容检测 workflow 对候选和清单内微信 APK 校验 SHA-256、签名和包身份，然后调用与模块相同的解析器检查两处 Hook。每次适配都运行已支持构建矩阵，特别确认 8.0.69 与 8.0.79 的目标定位规则均未回归。
+第一阶段的兼容检测 workflow 仅由 `workflow_dispatch` 手动触发，不设置每日计划。它读取 `compatibility/targets.json` 中的所有构建，将 APK SHA-256 用作独立缓存键；缓存命中仍重新校验摘要，缓存未命中则从清单登记的腾讯官方 CDN 地址下载并校验。每个构建调用与模块共用的 `compat-checker` 和 `compat-core`，并上传包含身份、Hook 解析结果或失败原因的诊断报告。下载源限制为 HTTPS `dldir1v6.qq.com/weixin/android/`。
 
-后续启用新版发现时，CI 下载候选 APK 并执行相同检查。唯一解析通过时，可以生成包含目标身份和静态结果的待审 PR；解析失败时生成诊断报告，不猜测 Hook 目标，也不把该版本标为支持。PR 的运行时验收由开发者在本地 AVD 矩阵完成并记录，PR 不自动合并。CI 不调用需要额外付费的 ChatGPT API。
+新增候选版本时，开发者先将从官方来源取得的 APK 身份及经分析的 Hook profile 登记到清单，再手动运行检查。工作流回归所有已登记版本；任何已支持旧版检查失败都会使对应矩阵任务失败。该阶段不抓取官网自动发现版本，不推测或生成 Hook 规则，也不创建或合并 PR。操作说明见 [兼容检测 CI](../validation/compatibility-check-ci.md)。
+
+后续启用新版自动发现时，CI 可下载候选 APK 并执行相同检查。唯一解析通过时，可以生成包含目标身份和静态结果的待审 PR；解析失败时生成诊断报告，不猜测 Hook 目标，也不把该版本标为支持。PR 的运行时验收由开发者在本地 AVD 矩阵完成并记录，PR 不自动合并。CI 不调用需要额外付费的 ChatGPT API。
 
 ## 验收
 
