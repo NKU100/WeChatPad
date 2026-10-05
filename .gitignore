@@ -16,3 +16,5 @@ work/analysis/
 *.jks
 *.keystore
 keystore.properties
+
+/signing/
