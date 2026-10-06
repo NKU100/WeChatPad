@@ -48,23 +48,18 @@ object CompatibilityResolver {
 
         val resolved = linkedMapOf<String, String>()
         for (rule in target.hooks) {
-            val anchored = facts.filter { rule.stringAnchor in it.strings }
-            if (anchored.isEmpty()) {
-                return rejected(CompatibilityStatus.MISSING_ANCHOR, "Hook '${rule.id}' anchor was not found")
+            val match = HookMethodMatcher.match(rule, facts)
+            when (match.status) {
+                HookMethodMatchStatus.MISSING_ANCHOR ->
+                    return rejected(CompatibilityStatus.MISSING_ANCHOR, "Hook '${rule.id}' anchor was not found")
+                HookMethodMatchStatus.SIGNATURE_MISMATCH ->
+                    return rejected(CompatibilityStatus.SIGNATURE_MISMATCH, "Hook '${rule.id}' method shape changed")
+                HookMethodMatchStatus.AMBIGUOUS_MATCH ->
+                    return rejected(CompatibilityStatus.AMBIGUOUS_MATCH, "Hook '${rule.id}' matched multiple methods")
+                HookMethodMatchStatus.UNIQUE_MATCH -> Unit
             }
 
-            val matchingShape = anchored.filter {
-                it.parameterDescriptors == rule.parameterDescriptors &&
-                    it.returnDescriptor == rule.returnDescriptor
-            }
-            if (matchingShape.isEmpty()) {
-                return rejected(CompatibilityStatus.SIGNATURE_MISMATCH, "Hook '${rule.id}' method shape changed")
-            }
-            if (matchingShape.size > 1) {
-                return rejected(CompatibilityStatus.AMBIGUOUS_MATCH, "Hook '${rule.id}' matched multiple methods")
-            }
-
-            val method = matchingShape.single()
+            val method = match.shapeMatchedMethods.single()
             if (method.descriptor != rule.expectedDescriptor) {
                 return rejected(CompatibilityStatus.DESCRIPTOR_MISMATCH, "Hook '${rule.id}' descriptor changed")
             }

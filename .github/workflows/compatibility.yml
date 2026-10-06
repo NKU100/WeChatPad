@@ -11,6 +11,12 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       targets: ${{ steps.targets.outputs.matrix }}
+      source_url: ${{ steps.discover.outputs.source_url }}
+      expected_sha256: ${{ steps.discover.outputs.expected_sha256 }}
+      cache_dir: ${{ steps.discover.outputs.cache_dir }}
+      cache_key: ${{ steps.discover.outputs.cache_key }}
+      version_code_hint: ${{ steps.discover.outputs.version_code_hint }}
+      pipeline_status: ${{ steps.preparation-failure.outputs.pipeline_status }}
     steps:
       - name: Check out source
         uses: actions/checkout@v7
@@ -18,8 +24,11 @@ jobs:
       - name: Test official candidate discovery and cache validation
         run: python3 -m unittest scripts.test_discover_latest_wechat
 
-      - name: Validate target manifest and create matrix
-        id: targets
+      - name: Test latest-three compatibility window selection
+        run: python3 -m unittest scripts.test_select_compatibility_window
+
+      - name: Validate target manifest
+        id: validate
         shell: bash
         run: |
           set -euo pipefail
@@ -41,13 +50,73 @@ jobs:
             )
           ' compatibility/targets.json >/dev/null
 
-          matrix="$(jq -c '[.[] | {
-            version_name: .identity.versionName,
-            version_code: .identity.versionCode,
-            sha256: (.identity.apkSha256 | ascii_downcase),
-            source_url: .sourceUrl
-          }]' compatibility/targets.json)"
-          printf 'matrix=%s\n' "$matrix" >> "$GITHUB_OUTPUT"
+      - name: Prepare official candidate diagnostic
+        run: |
+          mkdir -p compatibility-report
+          printf '# Latest official WeChat ARM64 compatibility check\n\n' \
+            > compatibility-report/latest-official.md
+
+      - name: Discover latest official ARM64 APK
+        id: discover
+        run: |
+          python3 -m scripts.ci.discover_latest_wechat \
+            --targets compatibility/targets.json \
+            --github-output "$GITHUB_OUTPUT" \
+            --report compatibility-report/latest-official.md
+
+      - name: Select the latest-three regression window
+        id: targets
+        env:
+          WECHAT_CANDIDATE_VERSION_CODE: ${{ steps.discover.outputs.version_code_hint }}
+        run: |
+          python3 -m scripts.ci.select_compatibility_window \
+            --targets compatibility/targets.json \
+            --candidate-version-code "$WECHAT_CANDIDATE_VERSION_CODE" \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Record candidate preparation failure
+        id: preparation-failure
+        if: failure()
+        env:
+          VALIDATION_RESULT: ${{ steps.validate.outcome }}
+          DISCOVERY_RESULT: ${{ steps.discover.outcome }}
+          TARGET_SELECTION_RESULT: ${{ steps.targets.outcome }}
+          WECHAT_APK_URL: ${{ steps.discover.outputs.source_url }}
+          WECHAT_TARGET_MATRIX: ${{ steps.targets.outputs.matrix || '[]' }}
+        run: |
+          status=STATIC_REGRESSION_FAILED
+          reason='Compatibility preparation failed before candidate analysis.'
+          if [[ "$VALIDATION_RESULT" == 'failure' || "$TARGET_SELECTION_RESULT" == 'failure' ]]; then
+            status=BASELINE_INVALID
+            reason='Compatibility target manifest or regression window is invalid.'
+          elif [[ "$DISCOVERY_RESULT" == 'failure' ]]; then
+            status=FETCH_FAILED
+            reason='Official WeChat candidate discovery failed.'
+          fi
+          checked_versions="$(jq -r '[.[].version_name] | join(",")' <<< "$WECHAT_TARGET_MATRIX")"
+          python3 -m scripts.ci.write_candidate_failure_report \
+            --report compatibility-report/candidate-report.json \
+            --github-output "$GITHUB_OUTPUT" \
+            --status "$status" \
+            --reason "$reason" \
+            --source-url "$WECHAT_APK_URL" \
+            --checked-versions "$checked_versions"
+          {
+            echo '## Candidate pipeline'
+            echo "- Status: $status"
+            echo "- Blocked: $reason"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload candidate preparation failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: wechatpad-candidate-preparation-failure
+          path: |
+            compatibility-report/candidate-report.json
+            compatibility-report/latest-official.md
+          if-no-files-found: warn
+          retention-days: 14
 
   check:
     needs: prepare
@@ -174,7 +243,11 @@ jobs:
 
   latest:
     name: Check latest official APK
+    needs: [prepare, check]
+    if: always() && needs.prepare.result == 'success'
     runs-on: ubuntu-latest
+    outputs:
+      pipeline_status: ${{ steps.latest-compatibility.outputs.pipeline_status || steps.candidate-failure.outputs.pipeline_status }}
     steps:
       - name: Check out source
         uses: actions/checkout@v7
@@ -203,31 +276,23 @@ jobs:
           printf '# Latest official WeChat ARM64 compatibility check\n\n' \
             > compatibility-report/latest-official.md
 
-      - name: Discover latest official ARM64 APK
-        id: discover
-        run: |
-          python3 -m scripts.ci.discover_latest_wechat \
-            --targets compatibility/targets.json \
-            --github-output "$GITHUB_OUTPUT" \
-            --report compatibility-report/latest-official.md
-
       - name: Prepare latest candidate cache
         env:
-          WECHAT_APK_CACHE_DIR: ${{ steps.discover.outputs.cache_dir }}
+          WECHAT_APK_CACHE_DIR: ${{ needs.prepare.outputs.cache_dir }}
         run: mkdir -p "$WECHAT_APK_CACHE_DIR"
 
       - name: Restore latest candidate by official URL
         uses: actions/cache@v6
         with:
-          path: ${{ steps.discover.outputs.cache_dir }}
-          key: ${{ steps.discover.outputs.cache_key }}
+          path: ${{ needs.prepare.outputs.cache_dir }}
+          key: ${{ needs.prepare.outputs.cache_key }}
 
       - name: Download and verify latest candidate
         id: candidate
         env:
-          WECHAT_APK_URL: ${{ steps.discover.outputs.source_url }}
-          WECHAT_APK_CACHE_DIR: ${{ steps.discover.outputs.cache_dir }}
-          WECHAT_APK_EXPECTED_SHA256: ${{ steps.discover.outputs.expected_sha256 }}
+          WECHAT_APK_URL: ${{ needs.prepare.outputs.source_url }}
+          WECHAT_APK_CACHE_DIR: ${{ needs.prepare.outputs.cache_dir }}
+          WECHAT_APK_EXPECTED_SHA256: ${{ needs.prepare.outputs.expected_sha256 }}
         run: |
           python3 -m scripts.ci.fetch_latest_wechat_apk \
             --url "$WECHAT_APK_URL" \
@@ -238,38 +303,70 @@ jobs:
 
       - name: Run shared compatibility checker on latest candidate
         id: latest-compatibility
-        continue-on-error: true
         env:
           WECHAT_APK_PATH: ${{ steps.candidate.outputs.apk_path }}
+          WECHAT_APK_URL: ${{ needs.prepare.outputs.source_url }}
+          WECHAT_TARGET_MATRIX: ${{ needs.prepare.outputs.targets }}
+          WECHAT_REGRESSION_PASSED: ${{ needs.check.result != 'failure' && needs.check.result != 'cancelled' }}
         shell: bash
         run: |
-          set -uo pipefail
-          printf '\n## Shared compat-core result\n\n' >> compatibility-report/latest-official.md
-
-          set +e
-          ./gradlew --no-daemon :compat-checker:run \
-            --args="check --targets compatibility/targets.json --apk $WECHAT_APK_PATH" \
-            2>&1 | tee -a compatibility-report/latest-official.md
-          checker_status=${PIPESTATUS[0]}
-          set -e
-
-          if [[ "$checker_status" -eq 0 ]]; then
-            printf '\nStatic compatibility check passed.\n' >> compatibility-report/latest-official.md
+          set -euo pipefail
+          checked_versions="$(jq -r '[.[].version_name] | join(",")' <<< "$WECHAT_TARGET_MATRIX")"
+          if [[ "$GITHUB_REF" == 'refs/heads/main' ]]; then
+            profile_merged_to_main=true
           else
-            printf '\nStatic compatibility check failed with exit code %s.\n' \
-              "$checker_status" >> compatibility-report/latest-official.md
+            profile_merged_to_main=false
           fi
-          exit "$checker_status"
+
+          ./gradlew --no-daemon :compat-checker:run \
+            --args="analyze-candidate --targets compatibility/targets.json --apk '$WECHAT_APK_PATH' --source-url '$WECHAT_APK_URL' --checked-versions '$checked_versions' --regression-passed '$WECHAT_REGRESSION_PASSED' --profile-merged-to-main '$profile_merged_to_main' --report compatibility-report/candidate-report.json" \
+            2>&1 | tee -a compatibility-report/latest-official.md
+
+      - name: Record candidate analysis failure
+        id: candidate-failure
+        if: failure() && steps.latest-compatibility.outcome != 'success'
+        env:
+          DOWNLOAD_RESULT: ${{ steps.candidate.outcome }}
+          WECHAT_APK_URL: ${{ needs.prepare.outputs.source_url }}
+          WECHAT_TARGET_MATRIX: ${{ needs.prepare.outputs.targets }}
+        run: |
+          if [[ -f compatibility-report/candidate-report.json ]]; then
+            exit 0
+          fi
+          status=STATIC_REGRESSION_FAILED
+          reason='Static candidate analysis could not complete.'
+          if [[ "$DOWNLOAD_RESULT" == 'failure' ]]; then
+            status=FETCH_FAILED
+            reason='Official candidate APK download or integrity verification failed.'
+          fi
+          checked_versions="$(jq -r '[.[].version_name] | join(",")' <<< "$WECHAT_TARGET_MATRIX")"
+          python3 -m scripts.ci.write_candidate_failure_report \
+            --report compatibility-report/candidate-report.json \
+            --github-output "$GITHUB_OUTPUT" \
+            --status "$status" \
+            --reason "$reason" \
+            --source-url "$WECHAT_APK_URL" \
+            --checked-versions "$checked_versions"
+
+      - name: Add pipeline result to the Actions summary
+        if: always() && hashFiles('compatibility-report/candidate-report.json') != ''
+        run: |
+          {
+            echo '## Candidate pipeline'
+            jq -r '"- Status: " + .status + "\n- Candidate: " + ((.identity.versionName // "unknown") + " (" + ((.identity.versionCode // "unknown") | tostring) + ")") + "\n- Baseline: " + (.baselineVersion // "none") + "\n- Checked builds: " + (.checkedVersions | join(", "))' compatibility-report/candidate-report.json
+            echo
+            echo '## Hook findings'
+            jq -r '.hooks[]? | "- " + .hookId + ": " + .status + " — " + (if (.selectedDescriptor // "") != "" then .selectedDescriptor elif (.candidateDescriptors | length) > 0 then (.candidateDescriptors | join(", ")) else .message end)' compatibility-report/candidate-report.json
+            jq -r '.blockers[]? | "- Blocked: " + .' compatibility-report/candidate-report.json
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload latest candidate diagnostic
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: wechatpad-latest-official-candidate
-          path: compatibility-report/latest-official.md
+          path: |
+            compatibility-report/candidate-report.json
+            compatibility-report/latest-official.md
           if-no-files-found: warn
           retention-days: 14
-
-      - name: Mark latest candidate checker failure
-        if: steps.latest-compatibility.outcome == 'failure'
-        run: exit 1

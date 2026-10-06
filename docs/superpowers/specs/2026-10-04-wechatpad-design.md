@@ -38,7 +38,7 @@ WeChatTablet 提交 [`7f53c39`](https://github.com/Xposed-Modules-Repo/top.hookv
 4. 校验方法结构、参数和返回类型，并要求每个 Hook 恰好命中一个候选。
 5. 输出可序列化的结果：兼容、未支持、profile 无效、特征缺失、签名不匹配、候选不唯一或 APK 身份不符。
 
-Android 模块运行时与后续的桌面兼容检查器必须调用同一份 `compat-core` 代码和同一份按构建登记的 Hook 特征数据。平台侧只提供 APK/DEX 数据及运行时可 Hook 的方法句柄；候选选择与安全判定不得各自复制一套实现。选择 DEX 读取方式时，先验证同一事实提取实现能否同时在 Android 运行时和兼容检测 CI 使用；若必须有平台适配器，适配器只负责读取数据，核心匹配规则仍保持共用。模块构建 CI 不执行这项兼容检查。
+Android 模块运行时与兼容检查器必须调用同一份 `compat-core` 代码和同一份按构建登记的 Hook 特征数据。`HookMethodMatcher` 是锚点、参数/返回形状和唯一性判断的单一实现，由正式 profile 解析和未知候选分析共同调用；候选分析额外检查前向推断标记，正式解析额外精确比较登记描述符。平台侧只提供 APK/DEX 数据及运行时可 Hook 的方法句柄。选择 DEX 读取方式时，先验证同一事实提取实现能否同时在 Android 运行时和兼容检测 CI 使用；若必须有平台适配器，适配器只负责读取数据，核心匹配规则仍保持共用。模块构建 CI 不执行这项兼容检查。
 
 ## 运行时行为
 
@@ -50,7 +50,7 @@ libxposed API 102 的 `onPackageLoaded` 在目标 `Application` 创建前执行�
 
 ## 兼容清单与证据
 
-`compatibility/targets.json` 登记每个微信构建的包名、版本名、版本码、渠道/ABI、APK SHA-256、签名证书摘要、Hook 特征版本及验证状态。状态至少区分：
+`compatibility/targets.json` 登记每个微信构建的包名、版本名、版本码、渠道/ABI、APK SHA-256、签名证书摘要、Hook 特征版本及验证状态。每个 Hook 还登记 `safeForForwardInference`，只有已验证可跨构建沿用的锚点才允许静态自动推断；默认和未标记值均为 `false`。状态至少区分：
 
 - `static-verified`：APK 来源、哈希、签名和共用解析器检查通过。
 - `runtime-verified-local`：开发者在本地专用 AVD 上确认模块注入并完成登录界面冒烟；PR 描述记录微信版本、AVD 系统镜像和结果。
@@ -67,9 +67,9 @@ libxposed API 102 的 `onPackageLoaded` 在目标 `Application` 创建前执行�
 
 ### 后续兼容检测 CI
 
-第一阶段的兼容检测 workflow 仅由 `workflow_dispatch` 手动触发，不设置每日计划。它检查 `compatibility/targets.json` 中的所有构建，并从微信官网首页发现最高版本 ARM64 APK 候选。已登记 APK 以 SHA-256 为缓存键；未知候选以官方直链 SHA-256 定位缓存，APK 文件按实际 SHA-256 命名，并保存 `Last-Modified`、`Content-Length` 与摘要以校验新鲜度和完整性。所有下载都限制为 HTTPS `dldir1v6.qq.com/weixin/android/`。
+兼容检测 workflow 仅由 `workflow_dispatch` 手动触发，不设置每日计划。它从微信官网首页发现最高版本 ARM64 APK 候选；未知候选加上版本码最高的两个已正式支持构建，候选已登记时检查最近三个已正式支持构建。已登记 APK 以 SHA-256 为缓存键；未知候选以官方直链 SHA-256 定位缓存，APK 文件按实际 SHA-256 命名，并保存 `Last-Modified`、`Content-Length` 与摘要以校验新鲜度和完整性。所有下载都限制为 HTTPS `dldir1v6.qq.com/weixin/android/`。
 
-每个构建调用与模块共用的 `compat-checker` 和 `compat-core`，并上传包含身份、Hook 解析结果或失败原因的诊断报告。官网候选若尚未登记，检查器报告未知构建，不猜测 Hook 目标；页面格式变化或候选不唯一时工作流失败并保留诊断。新增候选的 Hook profile 仍需人工分析并登记；本阶段不自动改代码、不创建或合并 PR。静态检查通过后仍需本地 AVD 验收。操作说明见 [兼容检测 CI](../validation/compatibility-check-ci.md)。这描述第一阶段的现状；自动适配流水线使用下述最近三个构建窗口。
+每个构建调用与模块共用的 `compat-checker` 和 `compat-core`。报告包含身份、逐 Hook 解析结果、回归版本和流水线状态，并上传 `candidate-report.json` artifact、写入 Actions summary 和 job output。未知候选只在所有必需 Hook 都由显式标记为可前向推断的锚点唯一定位时生成 profile 建议；否则进入 `NEEDS_HOOK_REVIEW`，不猜测 Hook 目标。当前阶段不自动改代码、不创建 Issue 或 PR。静态检查通过后仍需本地 AVD 验收。操作说明见 [兼容检测 CI](../validation/compatibility-check-ci.md)。
 
 ### 自动适配流水线
 
@@ -89,11 +89,11 @@ DISCOVERED
 
 下载或完整性失败进入 `FETCH_FAILED`；包名、ABI 或签名不符进入 `IDENTITY_REJECTED`；基线 profile 无效进入 `BASELINE_INVALID`；Hook 特征缺失、方法形状无法匹配或候选不唯一进入 `NEEDS_HOOK_REVIEW`；静态回归失败进入 `STATIC_REGRESSION_FAILED`；本地冒烟失败进入 `RUNTIME_REJECTED`。失败状态附诊断，不得转成正式支持。
 
-静态检查器先使用模块共享的 `compat-core` 识别候选 APK。所有必需 Hook 都能从稳定特征唯一定位时，适配步骤可以从实际 DEX 事实生成候选构建 profile，包括更新唯一命中的方法描述符。特征缺失、参数/返回形状变化或多重命中时，不推测 profile；由 Codex 适配 worker 在隔离分支提出代码或 profile 改动。自动或模型生成的改动都必须进入 draft PR，并再次通过同一兼容检查器和模块构建 CI；不得直接提交到主分支或自动合并。
+静态检查器先使用模块共享的 `compat-core` 识别候选 APK。每个 Hook 特征都必须明确声明 `safeForForwardInference`；只有经验证可跨构建沿用的稳定特征才能设为 `true`。未显式标记的特征即使唯一命中，也只报告候选描述符并进入人工检查，避免把同一字符串在新版中的辅助方法误认为 Hook 目标。所有必需 Hook 都能从允许前向推断的稳定特征唯一定位时，适配步骤可以从实际 DEX 事实生成候选构建 profile，包括更新唯一命中的方法描述符。特征缺失、参数/返回形状变化或多重命中时，不推测 profile；由 Codex 适配 worker 在隔离分支提出代码或 profile 改动。自动或模型生成的改动都必须进入 draft PR，并再次通过同一兼容检查器和模块构建 CI；不得直接提交到主分支或自动合并。
 
 常规适配回归窗口最多包含三个构建：若候选是新版本，则为候选 APK 加上 `compatibility/targets.json` 中版本码最高的两个已正式支持构建；若候选已登记，则取按版本码排序后的最新三个正式支持构建。版本重复时去重，登记版本不足三个时检查全部可用版本。窗口外的旧版 profile 仍保留，但不属于每轮候选 CI 的静态回归范围。
 
-Codex 自动适配 worker 的执行环境和订阅授权方式尚未确定。此前讨论过持久化自托管 Runner 作为一种候选，但用户尚未选择；因此当前设计不把自托管环境、凭据迁移或 SIWC 接入视为前提。worker 的接口边界先限定为：接收候选诊断，在隔离分支提出代码或 profile 改动，并创建 draft PR；所有改动仍经过同一静态检查，不能直接提交主分支或自动合并。实施 Codex worker 前，需先单独确定执行环境和授权方式。执行环境或授权不可用时，候选停留在 `NEEDS_HOOK_REVIEW`。
+Codex 自动适配 worker 的运行环境和授权方式尚未确定；当前静态兼容检测不依赖 worker。只有进入自动处理 `NEEDS_HOOK_REVIEW` 的下一阶段时，才需要确定 worker 如何运行及如何获得授权。worker 的接口边界限定为：接收候选诊断，在隔离分支提出代码或 profile 改动，并创建 draft PR；所有改动仍经过同一静态检查，不能直接提交主分支或自动合并。环境或授权暂不可用时，候选停留在 `NEEDS_HOOK_REVIEW`。
 
 静态回归通过后，候选进入 `WAITING_LOCAL_RUNTIME`。开发者在本地 AVD 对候选微信执行登录界面冒烟，并把结果记录到 PR；通过后将 profile 状态更新为 `runtime-verified-local`。只有该 PR 合并进主分支后，流水线才输出 `FORMALLY_SUPPORTED`。每日触发暂不启用；初始自动适配仍由 `workflow_dispatch` 驱动。OpenAI 用量限制或 worker 故障都不能绕过本地冒烟和 PR 合并门槛。
 
@@ -103,7 +103,7 @@ Codex 自动适配 worker 的执行环境和订阅授权方式尚未确定。此
 2. 8.0.69 与 8.0.79 的 APK 均通过身份校验；桌面检查器与运行时使用同一份按构建登记的特征数据和匹配结果。
 3. 开发者在本地专用 AVD 上对两版完成运行时冒烟，确认模块注入、微信不崩溃、登录入口出现且可进入二维码登录页面；PR 记录版本、镜像和结果。
 4. 一次新增版本适配的回归流程证明候选及回归窗口内的构建均可解析；候选未通过本地 AVD 或 PR 未合并时，不得输出 `FORMALLY_SUPPORTED`。
-5. 使用真实 8.0.79 APK 和临时清单分别验证 8.0.69→8.0.79、8.0.69+8.0.78→8.0.79 两条候选诊断链；临时清单不进入正式支持记录。
+5. 使用真实 8.0.78 和 8.0.79 APK：先以共用检查器核验临时 8.0.78 profile，再分别用仅含 8.0.69、以及含 8.0.69 和 8.0.78 的临时清单诊断 8.0.79。临时清单只模拟静态 pipeline 输入，不声称 8.0.78 已完成本地运行时验证，也不进入正式支持记录。
 6. 每轮候选 CI 最多静态检查三个构建，并明确在报告中记录被选中的版本；窗口外的正式支持 profile 保留在清单中，但不声称本轮已重新验证。
 7. 流水线状态同时出现在机器可读报告、Actions summary 和 job output；静态候选通过但尚未本地验收时不得输出 `FORMALLY_SUPPORTED`。
 8. GitHub 构建 CI 可从干净检出构建模块 APK 并将其作为 artifact 提供下载；不下载微信 APK、不执行兼容分析，也不依赖 AVD 或 LSPosed 环境。兼容检测 CI 与构建 CI 分离。

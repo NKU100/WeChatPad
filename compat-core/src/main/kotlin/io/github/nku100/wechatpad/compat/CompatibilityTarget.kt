@@ -10,6 +10,7 @@ data class HookRule(
     val parameterDescriptors: List<String>,
     val returnDescriptor: String,
     val expectedDescriptor: String,
+    val safeForForwardInference: Boolean = false,
 )
 
 @Serializable

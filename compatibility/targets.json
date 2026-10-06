@@ -17,14 +17,16 @@
         "stringAnchor": "Lenovo TB-9707F",
         "parameterDescriptors": ["Lfd5/n0;"],
         "returnDescriptor": "Z",
-        "expectedDescriptor": "Lcom/tencent/mm/ui/qj;->B(Lfd5/n0;)Z"
+        "expectedDescriptor": "Lcom/tencent/mm/ui/qj;->B(Lfd5/n0;)Z",
+        "safeForForwardInference": false
       },
       {
         "id": "login",
         "stringAnchor": "loginAsOtherDeviceBtn",
         "parameterDescriptors": ["Landroid/view/View;", "Landroidx/lifecycle/y;"],
         "returnDescriptor": "V",
-        "expectedDescriptor": "Lg21/h0;->a(Landroid/view/View;Landroidx/lifecycle/y;)V"
+        "expectedDescriptor": "Lg21/h0;->a(Landroid/view/View;Landroidx/lifecycle/y;)V",
+        "safeForForwardInference": true
       }
     ]
   },
@@ -46,14 +48,16 @@
         "stringAnchor": "inTabletEnv, no tablet condition matched, return false",
         "parameterDescriptors": ["Lpv5/w0;"],
         "returnDescriptor": "Z",
-        "expectedDescriptor": "Lcom/tencent/mm/ui/ok;->C(Lpv5/w0;)Z"
+        "expectedDescriptor": "Lcom/tencent/mm/ui/ok;->C(Lpv5/w0;)Z",
+        "safeForForwardInference": true
       },
       {
         "id": "login",
         "stringAnchor": "loginAsOtherDeviceBtn",
         "parameterDescriptors": ["Landroid/view/View;", "Landroidx/lifecycle/y;"],
         "returnDescriptor": "V",
-        "expectedDescriptor": "Lfb1/h0;->a(Landroid/view/View;Landroidx/lifecycle/y;)V"
+        "expectedDescriptor": "Lfb1/h0;->a(Landroid/view/View;Landroidx/lifecycle/y;)V",
+        "safeForForwardInference": true
       }
     ]
   }
