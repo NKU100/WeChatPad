@@ -1,12 +1,12 @@
 # WeChatPad 设计说明
 
-状态：已确认
+状态：修订待审阅
 
 ## 目标
 
 构建 LSPosed 模块 `io.github.nku100.wechatpad`，为微信提供平板登录入口，以便用户尝试在已有手机之外登录同一账号。模块只改变微信客户端的平板登录表现，不承诺微信服务器一定允许多个移动设备会话长期并存。
 
-首批兼容目标为微信 8.0.69 和 8.0.79：8.0.69 是新版平板判断特征出现前的最近版本，8.0.79 是当前版回归目标。两版共用 Hook 回调，但平板判断目标解析特征不同；仅混淆导致的方法描述符变化不作为选择依据。后续模块版本增加微信新版适配时，必须继续验证所有已支持的旧版。
+首批兼容目标为微信 8.0.69 和 8.0.79：8.0.69 是新版平板判断特征出现前的最近版本，8.0.79 是当前版回归目标。两版共用 Hook 回调，但平板判断目标解析特征不同；仅混淆导致的方法描述符变化不作为选择依据。兼容清单保留所有已正式支持的构建；每次候选适配只对最新三个相关构建执行真实 APK 静态回归，较早构建不因退出回归窗口而自动移除支持记录。
 
 ### 首批版本选择依据
 
@@ -55,7 +55,7 @@ libxposed API 102 的 `onPackageLoaded` 在目标 `Application` 创建前执行�
 - `static-verified`：APK 来源、哈希、签名和共用解析器检查通过。
 - `runtime-verified-local`：开发者在本地专用 AVD 上确认模块注入并完成登录界面冒烟；PR 描述记录微信版本、AVD 系统镜像和结果。
 
-静态通过不等同于正式兼容。旧版条目在后续模块升级中保留；只有本地完整版本矩阵回归通过才能继续标为 `runtime-verified-local`。GitHub CI 不负责产生运行时验证状态。
+静态通过不等同于正式兼容。正式支持状态要求候选 profile 通过规定的静态回归、本地 AVD 登录界面冒烟通过，并且包含该 profile 的 PR 已合并到主分支。GitHub CI 不负责产生本地运行时验证状态。已正式支持的较早构建保留在清单中，但常规候选 CI 不重复扫描整个历史版本矩阵。
 
 2026-10-05，本地 AVD 已完成 8.0.69 与 8.0.79 的无模块基线及 WeChatPad 登录流程冒烟；两个版本均显示平板登录入口并能进入二维码页面。二维码未扫描，未执行真实登录。环境和逐版本结果见 [本地运行时冒烟记录](../validation/wechatpad-local-smoke.md)。
 
@@ -69,17 +69,44 @@ libxposed API 102 的 `onPackageLoaded` 在目标 `Application` 创建前执行�
 
 第一阶段的兼容检测 workflow 仅由 `workflow_dispatch` 手动触发，不设置每日计划。它检查 `compatibility/targets.json` 中的所有构建，并从微信官网首页发现最高版本 ARM64 APK 候选。已登记 APK 以 SHA-256 为缓存键；未知候选以官方直链 SHA-256 定位缓存，APK 文件按实际 SHA-256 命名，并保存 `Last-Modified`、`Content-Length` 与摘要以校验新鲜度和完整性。所有下载都限制为 HTTPS `dldir1v6.qq.com/weixin/android/`。
 
-每个构建调用与模块共用的 `compat-checker` 和 `compat-core`，并上传包含身份、Hook 解析结果或失败原因的诊断报告。官网候选若尚未登记，检查器报告未知构建，不猜测 Hook 目标；页面格式变化或候选不唯一时工作流失败并保留诊断。新增候选的 Hook profile 仍需人工分析并登记；本阶段不自动改代码、不创建或合并 PR。静态检查通过后仍需本地 AVD 验收。操作说明见 [兼容检测 CI](../validation/compatibility-check-ci.md)。
+每个构建调用与模块共用的 `compat-checker` 和 `compat-core`，并上传包含身份、Hook 解析结果或失败原因的诊断报告。官网候选若尚未登记，检查器报告未知构建，不猜测 Hook 目标；页面格式变化或候选不唯一时工作流失败并保留诊断。新增候选的 Hook profile 仍需人工分析并登记；本阶段不自动改代码、不创建或合并 PR。静态检查通过后仍需本地 AVD 验收。操作说明见 [兼容检测 CI](../validation/compatibility-check-ci.md)。这描述第一阶段的现状；自动适配流水线使用下述最近三个构建窗口。
 
-后续可启用每日触发和待审 PR 生成。解析失败时继续只给诊断，不猜 Hook 目标或自动把版本标为支持。PR 的运行时验收由开发者在本地 AVD 矩阵完成并记录，PR 不自动合并。CI 不调用需要额外付费的 ChatGPT API。
+### 自动适配流水线
+
+候选流水线状态与模块运行时的 `UNKNOWN_BUILD` 分开。`UNKNOWN_BUILD` 只表示当前安装版本没有可用的正式 profile；流水线状态记录候选处理进度。每次运行输出机器可读的 `candidate-report.json` artifact，包含候选身份、来源与哈希、逐 Hook 结果、当前流水线状态、阻塞原因和本次实际检查的版本；同时写入 GitHub Actions job summary，并通过 job output 驱动后续步骤。成功的候选由 draft PR 持久化；进入 `NEEDS_HOOK_REVIEW` 的候选按版本和 APK SHA-256 创建或更新一个 GitHub Issue，并附诊断 artifact 链接，作为人工处理队列。artifact、Issue 和 PR 都不是正式支持清单。
+
+流水线按以下状态推进：
+
+```text
+DISCOVERED
+  -> APK_VERIFIED
+  -> ADAPTATION_RUNNING
+  -> STATIC_VERIFIED_PENDING_RUNTIME
+  -> WAITING_LOCAL_RUNTIME
+  -> LOCAL_RUNTIME_VERIFIED
+  -> FORMALLY_SUPPORTED
+```
+
+下载或完整性失败进入 `FETCH_FAILED`；包名、ABI 或签名不符进入 `IDENTITY_REJECTED`；基线 profile 无效进入 `BASELINE_INVALID`；Hook 特征缺失、方法形状无法匹配或候选不唯一进入 `NEEDS_HOOK_REVIEW`；静态回归失败进入 `STATIC_REGRESSION_FAILED`；本地冒烟失败进入 `RUNTIME_REJECTED`。失败状态附诊断，不得转成正式支持。
+
+静态检查器先使用模块共享的 `compat-core` 识别候选 APK。所有必需 Hook 都能从稳定特征唯一定位时，适配步骤可以从实际 DEX 事实生成候选构建 profile，包括更新唯一命中的方法描述符。特征缺失、参数/返回形状变化或多重命中时，不推测 profile；由 Codex 适配 worker 在隔离分支提出代码或 profile 改动。自动或模型生成的改动都必须进入 draft PR，并再次通过同一兼容检查器和模块构建 CI；不得直接提交到主分支或自动合并。
+
+常规适配回归窗口最多包含三个构建：若候选是新版本，则为候选 APK 加上 `compatibility/targets.json` 中版本码最高的两个已正式支持构建；若候选已登记，则取按版本码排序后的最新三个正式支持构建。版本重复时去重，登记版本不足三个时检查全部可用版本。窗口外的旧版 profile 仍保留，但不属于每轮候选 CI 的静态回归范围。
+
+Codex 自动适配 worker 的执行环境和订阅授权方式尚未确定。此前讨论过持久化自托管 Runner 作为一种候选，但用户尚未选择；因此当前设计不把自托管环境、凭据迁移或 SIWC 接入视为前提。worker 的接口边界先限定为：接收候选诊断，在隔离分支提出代码或 profile 改动，并创建 draft PR；所有改动仍经过同一静态检查，不能直接提交主分支或自动合并。实施 Codex worker 前，需先单独确定执行环境和授权方式。执行环境或授权不可用时，候选停留在 `NEEDS_HOOK_REVIEW`。
+
+静态回归通过后，候选进入 `WAITING_LOCAL_RUNTIME`。开发者在本地 AVD 对候选微信执行登录界面冒烟，并把结果记录到 PR；通过后将 profile 状态更新为 `runtime-verified-local`。只有该 PR 合并进主分支后，流水线才输出 `FORMALLY_SUPPORTED`。每日触发暂不启用；初始自动适配仍由 `workflow_dispatch` 驱动。OpenAI 用量限制或 worker 故障都不能绕过本地冒烟和 PR 合并门槛。
 
 ## 验收
 
 1. 共用兼容核心的测试覆盖：唯一命中、缺少或重复 Hook id、零命中、多重命中、方法签名不符、未知构建、错误 APK 身份和缓存失效。
 2. 8.0.69 与 8.0.79 的 APK 均通过身份校验；桌面检查器与运行时使用同一份按构建登记的特征数据和匹配结果。
 3. 开发者在本地专用 AVD 上对两版完成运行时冒烟，确认模块注入、微信不崩溃、登录入口出现且可进入二维码登录页面；PR 记录版本、镜像和结果。
-4. 一次新增版本适配的回归流程证明既有版本仍可解析；若任一旧版不通过，该更新不得扩大正式支持清单。
-5. GitHub 构建 CI 可从干净检出构建模块 APK 并将其作为 artifact 提供下载；不下载微信 APK、不执行兼容分析，也不依赖 AVD 或 LSPosed 环境。后续兼容检测 CI 单独验证候选与所有已支持版本。
+4. 一次新增版本适配的回归流程证明候选及回归窗口内的构建均可解析；候选未通过本地 AVD 或 PR 未合并时，不得输出 `FORMALLY_SUPPORTED`。
+5. 使用真实 8.0.79 APK 和临时清单分别验证 8.0.69→8.0.79、8.0.69+8.0.78→8.0.79 两条候选诊断链；临时清单不进入正式支持记录。
+6. 每轮候选 CI 最多静态检查三个构建，并明确在报告中记录被选中的版本；窗口外的正式支持 profile 保留在清单中，但不声称本轮已重新验证。
+7. 流水线状态同时出现在机器可读报告、Actions summary 和 job output；静态候选通过但尚未本地验收时不得输出 `FORMALLY_SUPPORTED`。
+8. GitHub 构建 CI 可从干净检出构建模块 APK 并将其作为 artifact 提供下载；不下载微信 APK、不执行兼容分析，也不依赖 AVD 或 LSPosed 环境。兼容检测 CI 与构建 CI 分离。
 
 ## 实施顺序
 
@@ -87,7 +114,11 @@ libxposed API 102 的 `onPackageLoaded` 在目标 `Application` 创建前执行�
 2. 获取并校验 8.0.69、8.0.79 APK，建立两版兼容清单与各自的平板判断定位特征。
 3. 实现最小运行时 Hook，完成两版 AVD 登录界面冒烟及旧版回归。
 4. 增加推送、PR、手动触发的构建 CI。
-5. 增加新版兼容检测和待审更新 PR；每日触发留待单独启用。
+5. 为未登记候选增加静态状态模型、逐 Hook 诊断报告和共用匹配逻辑；使用真实 8.0.79 APK，分别以仅有 8.0.69、以及 8.0.69 加 8.0.78 的临时清单验证状态输出，不改正式支持清单。
+6. 增加候选 profile 生成和 draft PR；每轮静态回归最多检查最近三个构建，并记录实际选择的版本。
+7. 确定 Codex 适配 worker 的执行环境和授权方式后，再实现 worker；只在静态检查无法安全自动适配时派发任务，模型改动仍走 draft PR 和同一套静态检查。
+8. 本地 AVD 验收通过后更新 profile 状态并合并 PR，只有主分支上的已合并条目才进入 `FORMALLY_SUPPORTED`。
+9. 每日触发留待单独启用。
 
 ## 首阶段运行时验证结论
 
