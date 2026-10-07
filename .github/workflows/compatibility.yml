@@ -2,6 +2,11 @@ name: Check WeChat compatibility
 
 on:
   workflow_dispatch:
+    inputs:
+      run_codex:
+        description: Adapt verified unknown builds with gpt-6-luna/xhigh (one attempt, up to 10 minutes)
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -248,6 +253,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       pipeline_status: ${{ steps.latest-compatibility.outputs.pipeline_status || steps.candidate-failure.outputs.pipeline_status }}
+      adaptation_eligible: ${{ steps.adaptation-eligibility.outputs.adaptation_eligible }}
     steps:
       - name: Check out source
         uses: actions/checkout@v7
@@ -322,6 +328,13 @@ jobs:
             --args="analyze-candidate --targets compatibility/targets.json --apk '$WECHAT_APK_PATH' --source-url '$WECHAT_APK_URL' --checked-versions '$checked_versions' --regression-passed '$WECHAT_REGRESSION_PASSED' --profile-merged-to-main '$profile_merged_to_main' --report compatibility-report/candidate-report.json" \
             2>&1 | tee -a compatibility-report/latest-official.md
 
+      - name: Determine whether Codex should adapt this build
+        id: adaptation-eligibility
+        run: |
+          python3 -m scripts.ci.codex_adaptation eligibility \
+            --repository . \
+            --report compatibility-report/candidate-report.json
+
       - name: Record candidate analysis failure
         id: candidate-failure
         if: failure() && steps.latest-compatibility.outcome != 'success'
@@ -368,5 +381,264 @@ jobs:
           path: |
             compatibility-report/candidate-report.json
             compatibility-report/latest-official.md
+          if-no-files-found: warn
+          retention-days: 14
+
+  adapt:
+    name: Adapt unknown build with Codex
+    needs: [prepare, check, latest]
+    if: >-
+      !cancelled() && github.ref == 'refs/heads/main' && inputs.run_codex &&
+      needs.latest.result == 'success' && needs.latest.outputs.adaptation_eligible == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    concurrency:
+      group: wechatpad-codex-managed-auth
+      cancel-in-progress: false
+    outputs:
+      pipeline_status: ${{ steps.publish.outputs.pipeline_status || steps.adaptation-failure.outputs.pipeline_status }}
+      pr_url: ${{ steps.publish.outputs.pr_url }}
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      actions: write
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Check out trusted pipeline source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Verify private repository and authentication configuration
+        env:
+          REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
+          CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+          GH_TOKEN: ${{ secrets.CODEX_AUTH_WRITE_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$REPOSITORY_PRIVATE" == 'true' ]] || { echo 'Managed account authentication requires a private repository.'; exit 1; }
+          [[ -n "$CODEX_AUTH_JSON" && -n "$GH_TOKEN" ]] || { echo 'Configure CODEX_AUTH_JSON and CODEX_AUTH_WRITE_TOKEN before starting Codex.'; exit 1; }
+          gh api "repos/$GITHUB_REPOSITORY/actions/secrets/public-key" >/dev/null
+
+      - name: Download verified candidate report
+        uses: actions/download-artifact@v8
+        with:
+          name: wechatpad-latest-official-candidate
+          path: compatibility-report
+
+      - name: Freeze adaptation controller outside agent checkout
+        run: |
+          CONTROLLER_ROOT="$RUNNER_TEMP/wechatpad-trusted"
+          CODEX_TASK_DIR="$RUNNER_TEMP/wechatpad-adaptation"
+          mkdir -p "$CONTROLLER_ROOT" "$CODEX_TASK_DIR"
+          {
+            echo "CONTROLLER_ROOT=$CONTROLLER_ROOT"
+            echo "CODEX_TASK_DIR=$CODEX_TASK_DIR"
+            echo "PYTHONPATH=$CONTROLLER_ROOT"
+          } >> "$GITHUB_ENV"
+          cp -R scripts "$CONTROLLER_ROOT/scripts"
+          cp .github/codex/adapt-wechat.md "$CONTROLLER_ROOT/adapt-wechat.md"
+
+      - name: Claim one adaptation attempt for this APK
+        id: claim
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd "$CONTROLLER_ROOT"
+          python3 -m scripts.ci.codex_task claim \
+            --report "$GITHUB_WORKSPACE/compatibility-report/candidate-report.json" \
+            --targets "$GITHUB_WORKSPACE/compatibility/targets.json" \
+            --directory "$CODEX_TASK_DIR"
+
+      - name: Set up JDK 21
+        if: steps.claim.outputs.claimed == 'true'
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Set up Android SDK
+        if: steps.claim.outputs.claimed == 'true'
+        uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+
+      - name: Prepare static validation dependencies
+        if: steps.claim.outputs.claimed == 'true'
+        run: |
+          sdkmanager 'platforms;android-37.2' 'build-tools;37.0.0'
+          ./gradlew --no-daemon :app:testDebugUnitTest :compat-core:test :compat-checker:test :app:assembleDebug
+
+      - name: Set up Node.js
+        if: steps.claim.outputs.claimed == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Install pinned Codex CLI and jadx
+        if: steps.claim.outputs.claimed == 'true'
+        run: |
+          set -euo pipefail
+          npm install --global @openai/codex@0.160.1
+          curl --fail --silent --show-error --location --retry 3 \
+            --output "$RUNNER_TEMP/jadx.zip" \
+            https://github.com/skylot/jadx/releases/download/v1.5.6/jadx-1.5.6.zip
+          printf '%s  %s\n' 545ea2be9c242511bc145755cf4bda2485ade42966e096f8b4d3da2a230e8974 "$RUNNER_TEMP/jadx.zip" | sha256sum --check
+          unzip -q "$RUNNER_TEMP/jadx.zip" -d "$RUNNER_TEMP/jadx"
+          echo "$RUNNER_TEMP/jadx/bin" >> "$GITHUB_PATH"
+
+      - name: Restore verified candidate cache
+        if: steps.claim.outputs.claimed == 'true'
+        uses: actions/cache@v6
+        with:
+          path: ${{ needs.prepare.outputs.cache_dir }}
+          key: ${{ needs.prepare.outputs.cache_key }}
+
+      - name: Restore first regression APK
+        if: steps.claim.outputs.claimed == 'true' && fromJSON(needs.prepare.outputs.targets)[0] != null
+        uses: actions/cache@v6
+        with:
+          path: .cache/wechat-apks/${{ fromJSON(needs.prepare.outputs.targets)[0].sha256 }}.apk
+          key: wechatpad-apk-${{ fromJSON(needs.prepare.outputs.targets)[0].sha256 }}
+
+      - name: Restore second regression APK
+        if: steps.claim.outputs.claimed == 'true' && fromJSON(needs.prepare.outputs.targets)[1] != null
+        uses: actions/cache@v6
+        with:
+          path: .cache/wechat-apks/${{ fromJSON(needs.prepare.outputs.targets)[1].sha256 }}.apk
+          key: wechatpad-apk-${{ fromJSON(needs.prepare.outputs.targets)[1].sha256 }}
+
+      - name: Revalidate candidate cache and prepare isolated checkout
+        if: steps.claim.outputs.claimed == 'true'
+        env:
+          WECHAT_APK_URL: ${{ needs.prepare.outputs.source_url }}
+          WECHAT_APK_CACHE_DIR: ${{ needs.prepare.outputs.cache_dir }}
+        run: |
+          set -euo pipefail
+          expected_sha256="$(jq -r .identity.apkSha256 compatibility-report/candidate-report.json)"
+          python3 -m scripts.ci.fetch_latest_wechat_apk \
+            --url "$WECHAT_APK_URL" --cache-dir "$WECHAT_APK_CACHE_DIR" \
+            --expected-sha256 "$expected_sha256" \
+            --github-output "$RUNNER_TEMP/candidate-cache-output" \
+            --report "$RUNNER_TEMP/candidate-cache-report.md"
+          cd "$CONTROLLER_ROOT"
+          python3 -m scripts.ci.codex_adaptation prepare \
+            --repository "$GITHUB_WORKSPACE" \
+            --report "$GITHUB_WORKSPACE/compatibility-report/candidate-report.json" \
+            --apk "$GITHUB_WORKSPACE/$WECHAT_APK_CACHE_DIR/$expected_sha256.apk" \
+            --directory "$CODEX_TASK_DIR"
+
+      - name: Restore dedicated managed account authentication
+        if: steps.claim.outputs.claimed == 'true'
+        id: restore-auth
+        env:
+          CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+          CODEX_HOME: ${{ runner.temp }}/wechatpad-codex-auth
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          auth = json.loads(os.environ['CODEX_AUTH_JSON'])
+          if auth.get('auth_mode') != 'chatgpt' or not auth.get('tokens', {}).get('refresh_token'):
+              raise SystemExit('CODEX_AUTH_JSON must contain dedicated managed ChatGPT authentication.')
+          home = Path(os.environ['CODEX_HOME'])
+          home.mkdir(mode=0o700)
+          path = home / 'auth.json'
+          path.touch(mode=0o600)
+          path.write_text(json.dumps(auth))
+          PY
+
+      - name: Adapt once with gpt-6-luna and xhigh
+        if: steps.claim.outputs.claimed == 'true'
+        timeout-minutes: 12
+        env:
+          CODEX_HOME: ${{ runner.temp }}/wechatpad-codex-auth
+        run: |
+          cd "$CONTROLLER_ROOT"
+          python3 -m scripts.ci.codex_adaptation model \
+            --directory "$CODEX_TASK_DIR" --prompt "$CONTROLLER_ROOT/adapt-wechat.md"
+
+      - name: Persist refreshed authentication even after model failure
+        if: always() && steps.restore-auth.outcome == 'success'
+        id: persist-auth
+        env:
+          CODEX_HOME: ${{ runner.temp }}/wechatpad-codex-auth
+          GH_TOKEN: ${{ secrets.CODEX_AUTH_WRITE_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh secret set CODEX_AUTH_JSON --repo "$GITHUB_REPOSITORY" < "$CODEX_HOME/auth.json"
+
+      - name: Remove runner authentication before validation
+        if: always() && steps.restore-auth.outcome == 'success'
+        env:
+          CODEX_HOME: ${{ runner.temp }}/wechatpad-codex-auth
+        run: rm -f "$CODEX_HOME/auth.json"
+
+      - name: Validate adaptation through shared checker and build
+        if: success() && steps.claim.outputs.claimed == 'true'
+        run: |
+          cd "$CONTROLLER_ROOT"
+          python3 -m scripts.ci.codex_adaptation validate --directory "$CODEX_TASK_DIR"
+
+      - name: Publish statically verified draft PR
+        if: success() && steps.claim.outputs.claimed == 'true'
+        id: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh auth setup-git
+          cd "$CONTROLLER_ROOT"
+          python3 -m scripts.ci.codex_task publish \
+            --directory "$CODEX_TASK_DIR" --issue '${{ steps.claim.outputs.issue }}'
+
+      - name: Start build workflow for the generated PR
+        if: success() && steps.publish.outputs.pr_url != ''
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ADAPTATION_PR: ${{ steps.publish.outputs.pr_url }}
+        run: |
+          branch="$(gh pr view "$ADAPTATION_PR" --json headRefName --jq .headRefName)"
+          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$branch"
+
+      - name: Record adaptation failure without retrying
+        if: failure() && steps.claim.outputs.claimed == 'true' && steps.publish.outputs.pr_url == ''
+        id: adaptation-failure
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd "$CONTROLLER_ROOT"
+          python3 -m scripts.ci.codex_task fail \
+            --directory "$CODEX_TASK_DIR" --issue '${{ steps.claim.outputs.issue }}' \
+            --report "$GITHUB_WORKSPACE/compatibility-report/candidate-report.json"
+
+      - name: Add adaptation result to summary
+        if: always()
+        env:
+          PIPELINE_STATUS: ${{ steps.publish.outputs.pipeline_status || steps.adaptation-failure.outputs.pipeline_status }}
+          ADAPTATION_PR: ${{ steps.publish.outputs.pr_url }}
+          CLAIMED: ${{ steps.claim.outputs.claimed }}
+          ISSUE_NUMBER: ${{ steps.claim.outputs.issue }}
+        run: |
+          {
+            echo '## Codex adaptation'
+            echo '- Model: gpt-6-luna; reasoning: xhigh; one attempt; 600-second model timeout.'
+            echo "- Status: ${PIPELINE_STATUS:-not started}"
+            echo "- Claimed: ${CLAIMED:-false}; issue: ${ISSUE_NUMBER:-none}"
+            [[ -z "$ADAPTATION_PR" ]] || echo "- Draft PR: $ADAPTATION_PR"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload deterministic adaptation result
+        if: always() && steps.claim.outputs.claimed == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: wechatpad-codex-adaptation
+          path: |
+            ${{ runner.temp }}/wechatpad-adaptation/candidate-report.json
+            ${{ runner.temp }}/wechatpad-adaptation/adaptation.patch
           if-no-files-found: warn
           retention-days: 14

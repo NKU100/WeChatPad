@@ -89,11 +89,13 @@ DISCOVERED
 
 下载或完整性失败进入 `FETCH_FAILED`；包名、ABI 或签名不符进入 `IDENTITY_REJECTED`；基线 profile 无效进入 `BASELINE_INVALID`；Hook 特征缺失、方法形状无法匹配或候选不唯一进入 `NEEDS_HOOK_REVIEW`；静态回归失败进入 `STATIC_REGRESSION_FAILED`；本地冒烟失败进入 `RUNTIME_REJECTED`。失败状态附诊断，不得转成正式支持。
 
-静态检查器先使用模块共享的 `compat-core` 识别候选 APK。每个 Hook 特征都必须明确声明 `safeForForwardInference`；只有经验证可跨构建沿用的稳定特征才能设为 `true`。未显式标记的特征即使唯一命中，也只报告候选描述符并进入人工检查，避免把同一字符串在新版中的辅助方法误认为 Hook 目标。所有必需 Hook 都能从允许前向推断的稳定特征唯一定位时，适配步骤可以从实际 DEX 事实生成候选构建 profile，包括更新唯一命中的方法描述符。特征缺失、参数/返回形状变化或多重命中时，不推测 profile；由 Codex 适配 worker 在隔离分支提出代码或 profile 改动。自动或模型生成的改动都必须进入 draft PR，并再次通过同一兼容检查器和模块构建 CI；不得直接提交到主分支或自动合并。
+静态检查器先使用模块共享的 `compat-core` 识别候选 APK。每个 Hook 特征都必须明确声明 `safeForForwardInference`；只有经验证可跨构建沿用的稳定特征才能设为 `true`。未显式标记的特征即使唯一命中，也只报告候选描述符并进入人工检查，避免把同一字符串在新版中的辅助方法误认为 Hook 目标。所有必需 Hook 都能从允许前向推断的稳定特征唯一定位时，适配步骤可以从实际 DEX 事实生成候选构建 profile，包括更新唯一命中的方法描述符。特征缺失、参数/返回形状变化或多重命中时，静态检查器不推测 profile。每个可信未登记构建均由 Codex 适配 worker 在隔离 checkout 提出代码或 profile 改动。自动或模型生成的改动都必须进入 draft PR，并再次通过同一兼容检查器和模块构建 CI；不得直接提交到主分支或自动合并。
 
 常规适配回归窗口最多包含三个构建：若候选是新版本，则为候选 APK 加上 `compatibility/targets.json` 中版本码最高的两个已正式支持构建；若候选已登记，则取按版本码排序后的最新三个正式支持构建。版本重复时去重，登记版本不足三个时检查全部可用版本。窗口外的旧版 profile 仍保留，但不属于每轮候选 CI 的静态回归范围。
 
-Codex 自动适配 worker 的运行环境和授权方式尚未确定；当前静态兼容检测不依赖 worker。只有进入自动处理 `NEEDS_HOOK_REVIEW` 的下一阶段时，才需要确定 worker 如何运行及如何获得授权。worker 的接口边界限定为：接收候选诊断，在隔离分支提出代码或 profile 改动，并创建 draft PR；所有改动仍经过同一静态检查，不能直接提交主分支或自动合并。环境或授权暂不可用时，候选停留在 `NEEDS_HOOK_REVIEW`。
+Codex 适配 worker 使用 GitHub 托管 runner，在可信私有仓库中通过独立的 ChatGPT managed-auth 登录使用订阅用量。每个身份验证通过、尚未登记的新构建都进入 Codex 适配，不再仅限于 `NEEDS_HOOK_REVIEW`。静态检测的锚点推断结果作为分析输入，正式登记仍由经过静态回归的 draft PR 和本地运行时验收完成。
+
+worker 固定使用 `gpt-6-luna`、`xhigh`，禁用子代理，模型进程最多运行 600 秒，不自动换模型或再次启动失败任务。版本码和 APK SHA-256 对应唯一 Issue 记录；重复发现已有记录时复用记录，不重复调用模型。适配任务串行使用 CI 独立登录状态；凭据从 Actions Secret 恢复，刷新后写回，模型进程不接收写回 token。凭据和原始模型输出不进入仓库或 artifact。具体配置见 [兼容检测 CI](../validation/compatibility-check-ci.md)。
 
 静态回归通过后，候选进入 `WAITING_LOCAL_RUNTIME`。开发者在本地 AVD 对候选微信执行登录界面冒烟，并把结果记录到 PR；通过后将 profile 状态更新为 `runtime-verified-local`。只有该 PR 合并进主分支后，流水线才输出 `FORMALLY_SUPPORTED`。每日触发暂不启用；初始自动适配仍由 `workflow_dispatch` 驱动。OpenAI 用量限制或 worker 故障都不能绕过本地冒烟和 PR 合并门槛。
 
@@ -116,7 +118,7 @@ Codex 自动适配 worker 的运行环境和授权方式尚未确定；当前静
 4. 增加推送、PR、手动触发的构建 CI。
 5. 为未登记候选增加静态状态模型、逐 Hook 诊断报告和共用匹配逻辑；使用真实 8.0.79 APK，分别以仅有 8.0.69、以及 8.0.69 加 8.0.78 的临时清单验证状态输出，不改正式支持清单。
 6. 增加候选 profile 生成和 draft PR；每轮静态回归最多检查最近三个构建，并记录实际选择的版本。
-7. 确定 Codex 适配 worker 的执行环境和授权方式后，再实现 worker；只在静态检查无法安全自动适配时派发任务，模型改动仍走 draft PR 和同一套静态检查。
+7. 对每个可信未登记构建运行一次订阅认证的 Codex worker；模型改动走 draft PR 和同一套静态检查，再等待本地运行时验收。
 8. 本地 AVD 验收通过后更新 profile 状态并合并 PR，只有主分支上的已合并条目才进入 `FORMALLY_SUPPORTED`。
 9. 每日触发留待单独启用。
 
