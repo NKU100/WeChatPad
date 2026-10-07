@@ -4,6 +4,7 @@ import json
 import subprocess
 import time
 import zipfile
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 
@@ -17,6 +18,16 @@ def adb(*arguments, timeout=60):
 
 def save(name, result):
     (EVIDENCE / name).write_bytes(result.stdout + result.stderr)
+
+
+def wechat_page_ready(activity, ui):
+    resumed = any('com.tencent.mm/' in line and 'WeChatSplashActivity' not in line
+                  and ('mResumedActivity' in line or 'topResumedActivity' in line)
+                  for line in activity.splitlines())
+    try:
+        return resumed and any(node.get('package') == 'com.tencent.mm' for node in ET.fromstring(ui).iter('node'))
+    except ET.ParseError:
+        return False
 
 
 def finish(status, reason, **details):
@@ -49,28 +60,32 @@ def main():
         return finish('MODULE_INSTALL_FAILED', 'The existing module APK could not be installed.', **details)
     launched = adb('shell', 'monkey', '-p', 'com.tencent.mm', '-c', 'android.intent.category.LAUNCHER', '1')
     save('wechat-launch.txt', launched)
-    visible = False
+    ready_count = 0
     for _ in range(30):
         activity = adb('shell', 'dumpsys', 'activity', 'activities')
         text = activity.stdout.decode(errors='replace')
         save('activities.txt', activity)
-        if any('com.tencent.mm/' in line and ('mResumedActivity' in line or 'topResumedActivity' in line) for line in text.splitlines()):
-            visible = True
+        adb('shell', 'uiautomator', 'dump', '/sdcard/probe-ui.xml', timeout=20)
+        ui = adb('shell', 'cat', '/sdcard/probe-ui.xml')
+        save('ui.xml', ui)
+        ready_count = ready_count + 1 if wechat_page_ready(text, ui.stdout) else 0
+        if ready_count >= 2:
             break
         time.sleep(2)
     time.sleep(5)
     activity = adb('shell', 'dumpsys', 'activity', 'activities')
     save('activities.txt', activity)
     text = activity.stdout.decode(errors='replace')
-    visible = visible and any('com.tencent.mm/' in line and ('mResumedActivity' in line or 'topResumedActivity' in line) for line in text.splitlines())
-    save('logcat.txt', adb('logcat', '-d', '-v', 'threadtime'))
+    adb('shell', 'uiautomator', 'dump', '/sdcard/probe-ui.xml', timeout=20)
+    ui = adb('shell', 'cat', '/sdcard/probe-ui.xml')
+    save('ui.xml', ui)
+    visible = ready_count >= 2 and wechat_page_ready(text, ui.stdout)
     screen = adb('exec-out', 'screencap', '-p')
     if screen.returncode == 0:
         (EVIDENCE / 'wechat-screen.png').write_bytes(screen.stdout)
-    adb('shell', 'uiautomator', 'dump', '/sdcard/probe-ui.xml')
-    save('ui.xml', adb('shell', 'cat', '/sdcard/probe-ui.xml'))
+    save('logcat.txt', adb('logcat', '-d', '-v', 'threadtime'))
     if not visible:
-        return finish('ARM_APK_LAUNCH_FAILED', 'WeChat did not remain the resumed application; inspect logs and screenshot.', **details)
+        return finish('ARM_APK_LAUNCH_FAILED', 'A visible WeChat page beyond the splash activity did not remain stable; inspect logs and screenshot.', **details)
     return finish('ARM_APK_RUNNING', 'ARM64 WeChat installed and remained visible. Root and LSPosed injection still require the next experiment stage.', **details)
 
 
