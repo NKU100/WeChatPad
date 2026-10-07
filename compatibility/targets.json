@@ -15,7 +15,9 @@
       {
         "id": "tablet",
         "stringAnchor": "Lenovo TB-9707F",
-        "parameterDescriptors": ["Lfd5/n0;"],
+        "parameterDescriptors": [
+          "Lfd5/n0;"
+        ],
         "returnDescriptor": "Z",
         "expectedDescriptor": "Lcom/tencent/mm/ui/qj;->B(Lfd5/n0;)Z",
         "safeForForwardInference": false
@@ -23,7 +25,10 @@
       {
         "id": "login",
         "stringAnchor": "loginAsOtherDeviceBtn",
-        "parameterDescriptors": ["Landroid/view/View;", "Landroidx/lifecycle/y;"],
+        "parameterDescriptors": [
+          "Landroid/view/View;",
+          "Landroidx/lifecycle/y;"
+        ],
         "returnDescriptor": "V",
         "expectedDescriptor": "Lg21/h0;->a(Landroid/view/View;Landroidx/lifecycle/y;)V",
         "safeForForwardInference": true
@@ -33,30 +38,35 @@
   {
     "identity": {
       "packageName": "com.tencent.mm",
-      "versionName": "8.0.79",
-      "versionCode": 3200,
+      "versionName": "8.0.78",
+      "versionCode": 3180,
       "abi": "arm64-v8a",
-      "apkSha256": "5feb100337981467fd257c3ad66bb171f54a69d2579b2ecc70d5a628db8e7282",
+      "apkSha256": "41f7dc1f720767fa78fa20dd13ea034b817bbf6ebd23dfd1324c647499c9c1ba",
       "signerSha256": "0fe4ff85c215918396dadc7cd8ce6963339af33d37751a56e54c7206b63a3c7c"
     },
-    "sourceUrl": "https://dldir1v6.qq.com/weixin/android/weixin8079android3200_0x28004f30_arm64.apk",
+    "sourceUrl": "https://dldir1v6.qq.com/weixin/android/weixin8078android3180_0x28004e32_arm64.apk",
     "verificationStatus": "runtime-verified-local",
     "featureRulesVersion": 1,
     "hooks": [
       {
         "id": "tablet",
         "stringAnchor": "inTabletEnv, no tablet condition matched, return false",
-        "parameterDescriptors": ["Lpv5/w0;"],
+        "parameterDescriptors": [
+          "Lou5/w0;"
+        ],
         "returnDescriptor": "Z",
-        "expectedDescriptor": "Lcom/tencent/mm/ui/ok;->C(Lpv5/w0;)Z",
+        "expectedDescriptor": "Lcom/tencent/mm/ui/gk;->C(Lou5/w0;)Z",
         "safeForForwardInference": true
       },
       {
         "id": "login",
         "stringAnchor": "loginAsOtherDeviceBtn",
-        "parameterDescriptors": ["Landroid/view/View;", "Landroidx/lifecycle/y;"],
+        "parameterDescriptors": [
+          "Landroid/view/View;",
+          "Landroidx/lifecycle/y;"
+        ],
         "returnDescriptor": "V",
-        "expectedDescriptor": "Lfb1/h0;->a(Landroid/view/View;Landroidx/lifecycle/y;)V",
+        "expectedDescriptor": "Lva1/h0;->a(Landroid/view/View;Landroidx/lifecycle/y;)V",
         "safeForForwardInference": true
       }
     ]
