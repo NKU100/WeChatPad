@@ -16,7 +16,6 @@ from scripts.ci.select_compatibility_window import select_regression_targets
 
 MODEL = "gpt-6-luna"
 REASONING = "xhigh"
-MODEL_TIMEOUT = 600
 ADAPTABLE_STATUSES = {"NEEDS_HOOK_REVIEW", "STATIC_VERIFIED_PENDING_RUNTIME"}
 
 
@@ -76,7 +75,7 @@ def validate_paths(paths):
             raise ValueError(f"Agent edit is outside the allowed adaptation paths: {path}")
 
 
-def run_bounded(command, cwd, env, log, timeout=MODEL_TIMEOUT):
+def run_bounded(command, cwd, env, log, timeout=None):
     with log.open("w") as output:
         process = subprocess.Popen(command, cwd=cwd, env=env, stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
         try:
@@ -84,7 +83,7 @@ def run_bounded(command, cwd, env, log, timeout=MODEL_TIMEOUT):
         except subprocess.TimeoutExpired:
             os.killpg(process.pid, signal.SIGKILL)
             process.wait()
-            raise TimeoutError("Codex exceeded its 600-second execution budget") from None
+            raise TimeoutError(f"Command exceeded its {timeout}-second execution limit") from None
     if result:
         raise RuntimeError(f"Command failed with exit code {result}; raw output is retained only on the runner")
 

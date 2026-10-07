@@ -3,6 +3,7 @@ import json
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch, MagicMock
 from pathlib import Path
 
 from scripts.ci.codex_adaptation import candidate_key, eligible_candidate, validate_profiles, validate_paths, run_bounded, validate_existing_tests, sha256
@@ -59,7 +60,15 @@ class CodexAdaptationTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'allowed'):
                 validate_paths([path])
 
-    def test_timeout_stops_the_model_process(self):
+    def test_model_has_no_custom_execution_timeout(self):
+        with tempfile.TemporaryDirectory() as temp, patch('scripts.ci.codex_adaptation.subprocess.Popen') as launch:
+            process = MagicMock()
+            process.wait.return_value = 0
+            launch.return_value = process
+            run_bounded(['codex'], Path(temp), {}, Path(temp) / 'output')
+            process.wait.assert_called_once_with(timeout=None)
+
+    def test_explicit_timeout_stops_a_bounded_command(self):
         with tempfile.TemporaryDirectory() as temp:
             with self.assertRaises(TimeoutError):
                 run_bounded(['python3', '-c', 'import time; time.sleep(30)'], Path(temp), {}, Path(temp) / 'output', timeout=0.1)

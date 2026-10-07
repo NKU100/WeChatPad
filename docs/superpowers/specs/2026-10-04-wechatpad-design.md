@@ -95,7 +95,7 @@ DISCOVERED
 
 Codex 适配 worker 使用 GitHub 托管 runner，在可信私有仓库中通过独立的 ChatGPT managed-auth 登录使用订阅用量。每个身份验证通过、尚未登记的新构建都进入 Codex 适配，不再仅限于 `NEEDS_HOOK_REVIEW`。静态检测的锚点推断结果作为分析输入，正式登记仍由经过静态回归的 draft PR 和本地运行时验收完成。
 
-worker 固定使用 `gpt-6-luna`、`xhigh`，禁用子代理，模型进程最多运行 600 秒，不自动换模型或再次启动失败任务。版本码和 APK SHA-256 对应唯一 Issue 记录；重复发现已有记录时复用记录，不重复调用模型。适配任务串行使用 CI 独立登录状态；凭据从 Actions Secret 恢复，刷新后写回，模型进程不接收写回 token。凭据和原始模型输出不进入仓库或 artifact。具体配置见 [兼容检测 CI](../validation/compatibility-check-ci.md)。
+worker 固定使用 `gpt-6-luna`、`xhigh`，禁用子代理，不设置模型进程的额外时间上限，不自动换模型或再次启动失败任务。版本码和 APK SHA-256 对应唯一 Issue 记录；重复发现已有记录时复用记录，不重复调用模型。适配任务串行使用 CI 独立登录状态；凭据从 Actions Secret 恢复，刷新后写回，模型进程不接收写回 token。凭据和原始模型输出不进入仓库或 artifact。具体配置见 [兼容检测 CI](../validation/compatibility-check-ci.md)。
 
 静态回归通过后，候选进入 `WAITING_LOCAL_RUNTIME`。开发者在本地 AVD 对候选微信执行登录界面冒烟，并把结果记录到 PR；通过后将 profile 状态更新为 `runtime-verified-local`。只有该 PR 合并进主分支后，流水线才输出 `FORMALLY_SUPPORTED`。每日触发暂不启用；初始自动适配仍由 `workflow_dispatch` 驱动。OpenAI 用量限制或 worker 故障都不能绕过本地冒烟和 PR 合并门槛。
 

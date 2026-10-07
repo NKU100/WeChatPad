@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       run_codex:
-        description: Adapt verified unknown builds with gpt-6-luna/xhigh (one attempt, up to 10 minutes)
+        description: Adapt verified unknown builds with gpt-6-luna/xhigh (one attempt)
         type: boolean
         default: true
 
@@ -394,7 +394,6 @@ jobs:
       !cancelled() && github.ref == 'refs/heads/main' && inputs.run_codex &&
       needs.latest.result == 'success' && needs.latest.outputs.adaptation_eligible == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 35
     concurrency:
       group: wechatpad-codex-managed-auth
       cancel-in-progress: false
@@ -557,7 +556,6 @@ jobs:
 
       - name: Adapt once with gpt-6-luna and xhigh
         if: steps.claim.outputs.claimed == 'true'
-        timeout-minutes: 12
         env:
           CODEX_HOME: ${{ runner.temp }}/wechatpad-codex-auth
         run: |
@@ -629,7 +627,7 @@ jobs:
         run: |
           {
             echo '## Codex adaptation'
-            echo '- Model: gpt-6-luna; reasoning: xhigh; one attempt; 600-second model timeout.'
+            echo '- Model: gpt-6-luna; reasoning: xhigh; one attempt; no custom model timeout.'
             echo "- Status: ${PIPELINE_STATUS:-not started}"
             echo "- Claimed: ${CLAIMED:-false}; issue: ${ISSUE_NUMBER:-none}"
             [[ -z "$ADAPTATION_PR" ]] || echo "- Draft PR: $ADAPTATION_PR"

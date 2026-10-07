@@ -23,5 +23,5 @@ change model or reasoning settings, log in, read credentials, push, or create PR
 The controller will run the shared checker for the candidate and up to two older
 versions, build the module, and prepare a draft PR after you finish.
 
-You have at most 10 minutes. If the actual Hook logic cannot be established safely,
+If the actual Hook logic cannot be established safely,
 leave the manifest unchanged and explain the unresolved evidence briefly.

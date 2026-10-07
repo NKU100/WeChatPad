@@ -24,7 +24,7 @@ def issue_body(report, status, run_url, pr_url=""):
     lines = [f"<!-- wechatpad-adaptation:{candidate_key(report)} -->", f"Status: `{status}`", "",
              f"WeChat {identity['versionName']} ({identity['versionCode']})", f"APK SHA-256: `{identity['apkSha256']}`",
              f"Source: {report['sourceUrl']}", f"Run: {run_url}", "",
-             "Model: `gpt-6-luna`; reasoning: `xhigh`; maximum model runtime: 600 seconds."]
+             "Model: `gpt-6-luna`; reasoning: `xhigh`; one adaptation attempt."]
     if pr_url:
         lines.extend(["", f"Draft PR: {pr_url}", "Local login-screen runtime smoke is required before formal support."])
     else:
