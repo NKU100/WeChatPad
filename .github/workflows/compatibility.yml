@@ -32,6 +32,9 @@ jobs:
       - name: Test latest-three compatibility window selection
         run: python3 -m unittest scripts.test_select_compatibility_window
 
+      - name: Test Codex eligibility, edit guards, timeout, and deduplication
+        run: python3 -m unittest scripts.test_codex_adaptation scripts.test_codex_task
+
       - name: Validate target manifest
         id: validate
         shell: bash

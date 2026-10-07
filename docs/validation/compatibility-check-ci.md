@@ -52,6 +52,6 @@ bash scripts/setup_codex_ci_auth.sh NKU100/WeChatPad
 
 runner 在模型调用前恢复凭据，之后即使模型失败也写回刷新后的文件，并在静态验证前删除 runner 上的凭据。写回 token 不传给模型进程。原始模型输出、登录凭据和会话目录不上传 artifact。凭据失效或 token 到期需要重新配置；不得通过自动重复适配来尝试修复登录。
 
-还需在仓库 Actions 设置中允许 GitHub Actions 创建 Pull Request。draft PR 发布使用权限受限的 `GITHUB_TOKEN`；由该 token 创建的 PR 通常不会自动触发其他 workflow，因此发布后显式手动触发构建 workflow。
+还需在仓库 Actions 设置中开启 **Allow GitHub Actions to create and approve pull requests**。GitHub 将创建与审批放在同一个开关；此流水线只创建 draft PR，不提交审批或合并。draft PR 发布使用权限受限的 `GITHUB_TOKEN`；由该 token 创建的 PR 通常不会自动触发其他 workflow，因此发布后显式手动触发构建 workflow。
 
 参考：[OpenAI managed-auth CI 指南](https://learn.chatgpt.com/docs/auth/ci-cd-auth)、[GitHub Secret 写入权限](https://docs.github.com/en/rest/actions/secrets#create-or-update-a-repository-secret)。
