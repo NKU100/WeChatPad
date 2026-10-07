@@ -1,0 +1,88 @@
+name: Probe hosted WeChat smoke environment
+
+on:
+  workflow_dispatch:
+    inputs:
+      module_run_id:
+        description: Successful Build module APK run to reuse
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: hosted-wechat-smoke-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+      - name: Reuse module build
+        uses: actions/download-artifact@v8
+        with:
+          name: wechatpad-module-apk
+          path: work/probe/module
+          run-id: ${{ inputs.module_run_id }}
+          github-token: ${{ github.token }}
+      - name: Fetch registered official WeChat APK
+        run: |
+          mkdir -p work/probe/evidence
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          target = next(p for p in json.loads(Path('compatibility/targets.json').read_text()) if p['identity']['versionName'] == '8.0.79')
+          with open(os.environ['GITHUB_ENV'], 'a') as out:
+              out.write('PROBE_WECHAT_URL=' + target['sourceUrl'] + '\n')
+              out.write('PROBE_WECHAT_SHA256=' + target['identity']['apkSha256'] + '\n')
+          PY
+      - name: Download and verify APK
+        run: |
+          curl --fail --location --silent --show-error --retry 2 --connect-timeout 20 --max-time 300 \
+            --proto '=https' --proto-redir '=https' "$PROBE_WECHAT_URL" -o work/probe/wechat.apk
+          printf '%s  %s\n' "$PROBE_WECHAT_SHA256" work/probe/wechat.apk | sha256sum --check
+          sdkmanager 'build-tools;37.0.0'
+          "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --print-certs work/probe/wechat.apk > work/probe/evidence/apk-signer.txt
+          grep -F '0fe4ff85c215918396dadc7cd8ce6963339af33d37751a56e54c7206b63a3c7c' work/probe/evidence/apk-signer.txt
+      - name: Enable KVM access
+        run: |
+          test -c /dev/kvm
+          sudo chmod 666 /dev/kvm
+      - name: Probe ARM64 APK on accelerated x86_64 AVD
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_5
+          ram-size: 2048M
+          disk-size: 4096M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none -no-snapshot
+          script: python3 scripts/ci/hosted_smoke_probe.py
+      - name: Upload environment evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: hosted-wechat-smoke-probe
+          path: work/probe/evidence/
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Summarize probe
+        if: always()
+        run: |
+          if [[ -f work/probe/evidence/summary.md ]]; then
+            cat work/probe/evidence/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Probe failed before device inspection; see setup steps.' >> "$GITHUB_STEP_SUMMARY"
+          fi
