@@ -71,12 +71,12 @@ def unique_node(xml, predicate):
 
 
 def snapshot(label):
-    adb('shell', 'rm', '-f', '/sdcard/hosted-smoke.xml')
+    adb('shell', 'rm', '-f', '/data/local/tmp/hosted-smoke.xml')
     dump = adb('shell', 'env', 'CLASSPATH=/data/local/tmp/ui-hierarchy.jar',
-               'app_process', '/system/bin', 'UiHierarchy', '/sdcard/hosted-smoke.xml',
+               'app_process', '/system/bin', 'UiHierarchy', '/data/local/tmp/hosted-smoke.xml',
                timeout=25, check=False)
     save(label + '-dump.txt', dump)
-    ui = adb('shell', 'cat', '/sdcard/hosted-smoke.xml', check=False)
+    ui = adb('shell', 'cat', '/data/local/tmp/hosted-smoke.xml', check=False)
     save(label + '.xml', ui)
     screen = adb('exec-out', 'screencap', '-p', check=False)
     if screen.returncode == 0:

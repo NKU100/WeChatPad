@@ -23,6 +23,7 @@ class UiEvidenceTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder, patch.object(smoke, "EVIDENCE", Path(folder)), patch.object(smoke, "adb", return_value=result) as device:
             smoke.snapshot("probe")
         self.assertTrue(any("UiHierarchy" in call.args for call in device.call_args_list))
+        self.assertFalse(any("/sdcard/" in str(call.args) for call in device.call_args_list))
 
     def test_manager_and_module_are_installed_before_framework_reboot(self):
         events = []
