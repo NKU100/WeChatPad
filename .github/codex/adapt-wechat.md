@@ -20,8 +20,11 @@ or historical verification records. Leave all changes uncommitted.
 
 Use this single agent only. Do not spawn subagents, launch another Codex process,
 change model or reasoning settings, log in, read credentials, push, or create PRs.
-The controller will run the shared checker for the candidate and up to two older
-versions, build the module, and prepare a draft PR after you finish.
+The controller will pause the goal after each turn and independently run the
+shared checker for the candidate and up to two older versions, plus module tests
+and build. If verification fails, use its feedback to continue in the same thread.
+Do not treat a final response as success; the controller must verify the files.
+After successful independent verification it will prepare a draft PR.
 
 If the actual Hook logic cannot be established safely,
 leave the manifest unchanged and explain the unresolved evidence briefly.

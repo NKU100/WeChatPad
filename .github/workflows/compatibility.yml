@@ -9,6 +9,10 @@ on:
         description: Run static regression even when the exact APK is already supported
         type: boolean
         default: false
+      goal_token_budget:
+        description: Maximum token budget for one Codex adaptation goal
+        type: string
+        default: '150000'
       retry_adaptation:
         description: Retry a failed or cancelled adaptation for the latest exact APK
         type: boolean
@@ -44,7 +48,7 @@ jobs:
         run: python3 -m unittest scripts.test_select_compatibility_window
 
       - name: Test Codex eligibility, edit guards, timeout, and deduplication
-        run: python3 -m unittest scripts.test_codex_adaptation scripts.test_codex_task
+        run: python3 -m unittest scripts.test_codex_adaptation scripts.test_codex_task scripts.test_codex_goal
 
       - name: Validate target manifest
         id: validate
@@ -613,14 +617,16 @@ jobs:
           path.write_text(json.dumps(auth))
           PY
 
-      - name: Adapt once with gpt-6-luna and xhigh
+      - name: Adapt through a verified Codex goal
         if: steps.claim.outputs.claimed == 'true'
         env:
           CODEX_HOME: ${{ runner.temp }}/wechatpad-codex-auth
+          GOAL_TOKEN_BUDGET: ${{ inputs.goal_token_budget || '150000' }}
         run: |
           cd "$CONTROLLER_ROOT"
           python3 -m scripts.ci.codex_adaptation model \
-            --directory "$CODEX_TASK_DIR" --prompt "$CONTROLLER_ROOT/adapt-wechat.md"
+            --directory "$CODEX_TASK_DIR" --prompt "$CONTROLLER_ROOT/adapt-wechat.md" \
+            --goal-token-budget "$GOAL_TOKEN_BUDGET"
 
       - name: Persist refreshed authentication even after model failure
         if: always() && steps.restore-auth.outcome == 'success'
@@ -711,7 +717,7 @@ jobs:
         run: |
           {
             echo '## Codex adaptation'
-            echo '- Model: gpt-6-luna; reasoning: xhigh; one attempt; no custom model timeout.'
+            echo '- Model: gpt-6-luna; reasoning: xhigh; one goal; independent verification; no custom model timeout.'
             echo "- Status: ${PIPELINE_STATUS:-not started}"
             echo "- Claimed: ${CLAIMED:-false}; issue: ${ISSUE_NUMBER:-none}"
             [[ -z "$ADAPTATION_PR" ]] || echo "- Draft PR: $ADAPTATION_PR"
@@ -725,6 +731,7 @@ jobs:
           path: |
             ${{ runner.temp }}/wechatpad-adaptation/candidate-report.json
             ${{ runner.temp }}/wechatpad-adaptation/adaptation.patch
+            ${{ runner.temp }}/wechatpad-adaptation/goal-diagnostics.json
           if-no-files-found: warn
           retention-days: 14
 

@@ -140,17 +140,9 @@ def prepare(repository, report_path, candidate_apk, directory):
     (directory / "state.json").write_text(json.dumps(state, indent=2))
 
 
-def run_model(directory, prompt_path):
-    state = json.loads((directory / "state.json").read_text())
-    worktree = Path(state["worktree"])
-    allowed_env = {"PATH", "HOME", "LANG", "LC_ALL", "JAVA_HOME", "ANDROID_HOME", "ANDROID_SDK_ROOT",
-                   "GRADLE_USER_HOME", "CODEX_HOME", "SSL_CERT_FILE", "TMPDIR"}
-    env = {key: value for key, value in os.environ.items() if key in allowed_env}
-    prompt = prompt_path.read_text()
-    command = ["codex", "exec", "--ignore-user-config", "--ephemeral", "--sandbox", "workspace-write",
-               "--model", MODEL, "-c", f'model_reasoning_effort="{REASONING}"',
-               "-c", "approval_policy=\"never\"", "-c", "features.multi_agent=false", "-c", "features.multi_agent_v2=false", prompt]
-    run_bounded(command, worktree, env, directory / "model-output.log")
+def run_model(directory, prompt_path, token_budget=150_000):
+    from scripts.ci.codex_goal import run_model_goal
+    run_model_goal(directory, prompt_path, token_budget)
 
 
 def validate(directory):
@@ -197,6 +189,7 @@ def main():
     parser.add_argument("--apk", type=Path)
     parser.add_argument("--directory", type=Path)
     parser.add_argument("--prompt", type=Path)
+    parser.add_argument("--goal-token-budget", type=int, default=150_000)
     args = parser.parse_args()
     if args.stage == "eligibility":
         report = json.loads(args.report.read_text())
@@ -207,7 +200,7 @@ def main():
     elif args.stage == "prepare":
         prepare(args.repository.resolve(), args.report, args.apk.resolve(), args.directory.resolve())
     elif args.stage == "model":
-        run_model(args.directory.resolve(), args.prompt)
+        run_model(args.directory.resolve(), args.prompt, args.goal_token_budget)
     else:
         validate(args.directory.resolve())
 

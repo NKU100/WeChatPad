@@ -35,7 +35,7 @@
 
 ## Codex 适配
 
-`Run workflow` 中的 `run_codex` 默认为开启，只在主分支手动或定时运行中发现可信的未登记构建时调用模型。关闭该选项可只运行静态检测。每个构建以版本码和完整 APK SHA-256 维护 Issue 记录，只认可 `github-actions[bot]` 创建且带 `wechatpad-adaptation` 标签的记录，排除 PR。旧的机器人记录会补上标签，不重复适配。已有记录默认跳过，失败或超时不会自动再次调用模型。手动开启 `retry_adaptation` 可复用原 Issue 重试失败、取消、超时或跳过的适配；仍在执行的任务不能重试。已有适配 PR 时保留原 PR 和运行验证路径，不重新调用模型；运行验证未完成时使用原运行的重跑入口。任务串行运行，固定使用 `gpt-6-luna` 和 `xhigh`，关闭多代理能力，不自动升级模型。不设置模型进程或适配 job 的额外时间上限；任务仍受 GitHub Actions 平台限制，单次适配的订阅消耗取决于实际工作量。
+`Run workflow` 中的 `run_codex` 默认为开启，只在主分支手动或定时运行中发现可信的未登记构建时调用模型。关闭该选项可只运行静态检测。每个构建以版本码和完整 APK SHA-256 维护 Issue 记录，只认可 `github-actions[bot]` 创建且带 `wechatpad-adaptation` 标签的记录，排除 PR。旧的机器人记录会补上标签，不重复适配。已有记录默认跳过，失败或超时不会自动再次调用模型。手动开启 `retry_adaptation` 可复用原 Issue 重试失败、取消、超时或跳过的适配；仍在执行的任务不能重试。已有适配 PR 时保留原 PR 和运行验证路径，不重新调用模型；运行验证未完成时使用原运行的重跑入口。任务串行运行，通过 Codex app-server 为每个构建创建一个 Goal，固定使用 `gpt-6-luna` 和 `xhigh`，关闭多代理能力，不自动升级模型。Goal 默认总 Token 预算为 150000，手动入口可用 `goal_token_budget` 调整为正整数；达到预算或用量限制、明确受阻、同一验收错误连续出现三次时停止。每轮结束后控制器暂停 Goal 并等待线程空闲，再独立验证改动；失败原因反馈给同一线程继续修正，不创建新适配任务。模型标记完成不能绕过独立验收。不设置模型进程或适配 job 的额外时间上限；任务仍受 GitHub Actions 平台限制，单次适配的订阅消耗取决于实际工作量。
 
 模型在隔离 checkout 中检查真实 APK，可使用 jadx。控制器拒绝修改既有 profile、检查器、脚本、工作流和构建配置。新增 profile 必须使用已校验的身份和来源，状态只能为 `static-verified`。候选和最多两个较早正式支持版本分别经过共用检查器；核心测试、模块测试和 debug APK 构建通过后才发布 draft PR，并把 Issue 状态更新为 `WAITING_RUNTIME`。模型失败或静态检查失败时，Issue 和结果报告停留在 `NEEDS_HOOK_REVIEW`。
 
@@ -62,7 +62,7 @@ gh secret set CODEX_AUTH_WRITE_TOKEN --repo NKU100/WeChatPad
 bash scripts/setup_codex_ci_auth.sh NKU100/WeChatPad
 ```
 
-runner 在模型调用前恢复凭据，之后即使模型失败也写回刷新后的文件，并在静态验证前删除 runner 上的凭据。写回 token 不传给模型进程。原始模型输出、登录凭据和会话目录不上传 artifact。凭据失效或 token 到期需要重新配置；不得通过自动重复适配来尝试修复登录。
+runner 在模型调用前恢复凭据，Goal 结束后即使模型失败也写回刷新后的文件，删除认证文件，再执行发布前的最终独立验收。写回 token 不传给模型进程。原始模型输出、登录凭据和会话目录不上传 artifact。产物中的 `goal-diagnostics.json` 保留每轮验收结果、Goal 用量、模型最终说明及失败工具摘要；已知认证凭据和常见 Token 格式在写入前过滤。凭据失效或 token 到期需要重新配置；不得通过自动重复适配来尝试修复登录。
 
 还需在仓库 Actions 设置中开启 **Allow GitHub Actions to create and approve pull requests**。GitHub 将创建与审批放在同一个开关；此流水线只创建 draft PR，不提交审批或合并。draft PR 发布使用权限受限的 `GITHUB_TOKEN`；由该 token 创建的 PR 通常不会自动触发其他 workflow，因此发布后显式手动触发构建 workflow。
 
