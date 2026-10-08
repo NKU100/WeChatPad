@@ -70,6 +70,15 @@ class UiEvidenceTest(unittest.TestCase):
             self.assertEqual(smoke.mobile_input('module'), mobile)
             self.assertEqual(click.call_count, 1)
 
+    def test_reboot_waits_for_unlocked_user_after_boot_completed(self):
+        states = iter((b'RUNNING_LOCKED', b'RUNNING_UNLOCKING', b'RUNNING_UNLOCKED'))
+        def device(*args, **kwargs):
+            data = next(states) if args == ('shell', 'am', 'get-started-user-state', '0') else b'1'
+            return subprocess.CompletedProcess([], 0, data, b'')
+        with patch.object(smoke, 'adb', side_effect=device) as commands, patch.object(smoke, 'save'), patch.object(smoke.time, 'sleep'):
+            smoke.reboot()
+        self.assertEqual(sum(call.args == ('shell', 'am', 'get-started-user-state', '0') for call in commands.call_args_list), 3)
+
     def test_launcher_is_not_wechat(self):
         self.assertFalse(smoke.has_wechat_ui('<hierarchy><node package="com.google.android.apps.nexuslauncher" /></hierarchy>'))
 

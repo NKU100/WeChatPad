@@ -158,9 +158,12 @@ def reboot():
     adb('wait-for-device', timeout=180)
     for _ in range(90):
         if adb('shell', 'getprop', 'sys.boot_completed', check=False).stdout.strip() == b'1':
-            return
+            user = adb('shell', 'am', 'get-started-user-state', '0', check=False)
+            save('reboot-user-state.txt', user)
+            if user.returncode == 0 and user.stdout.strip() == b'RUNNING_UNLOCKED':
+                return
         time.sleep(2)
-    raise RuntimeError('Device did not complete reboot')
+    raise RuntimeError('Device did not complete reboot and unlock user 0')
 
 
 def bootstrap_magisk():
