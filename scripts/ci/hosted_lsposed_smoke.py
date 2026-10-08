@@ -91,7 +91,13 @@ def tap(node):
     time.sleep(2)
 
 
+def enable_page_size_backcompat():
+    # Recovery libraries unpacked at runtime can still have 4 KB ELF alignment.
+    su('setprop bionic.linker.16kb.app_compat.enabled true; setprop pm.16kb.app_compat.disabled false')
+
+
 def mobile_input(label):
+    enable_page_size_backcompat()
     adb('shell', 'am', 'force-stop', WECHAT)
     adb('shell', 'monkey', '-p', WECHAT, '-c', 'android.intent.category.LAUNCHER', '1')
     ready = 0
@@ -179,6 +185,8 @@ def main():
     report = {'status': 'FAILED', 'stage': stage}
     try:
         stage = 'BASELINE'
+        enable_page_size_backcompat()
+        save('page-size-compat.txt', adb('shell', 'getprop'))
         adb('logcat', '-c')
         save('wechat-install.txt', adb('install', '-r', '-g', str(ROOT / 'wechat.apk'), timeout=240))
         ui = mobile_input('baseline-mobile')

@@ -1,6 +1,7 @@
 import importlib.util
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location('smoke', Path(__file__).parent / 'ci/hosted_lsposed_smoke.py')
 smoke = importlib.util.module_from_spec(spec)
@@ -8,6 +9,11 @@ spec.loader.exec_module(smoke)
 
 
 class UiEvidenceTest(unittest.TestCase):
+    def test_page_size_backcompat_is_enabled_before_each_launch(self):
+        with patch.object(smoke, "su") as root:
+            smoke.enable_page_size_backcompat()
+        self.assertEqual(root.call_args_list[0].args, ("setprop bionic.linker.16kb.app_compat.enabled true; setprop pm.16kb.app_compat.disabled false",))
+
     def test_launcher_is_not_wechat(self):
         self.assertFalse(smoke.has_wechat_ui('<hierarchy><node package="com.google.android.apps.nexuslauncher" /></hierarchy>'))
 
