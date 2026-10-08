@@ -1,6 +1,10 @@
 Adapt the unknown WeChat APK described in work/analysis/candidate-report.json.
 The candidate APK is work/apks/candidate.apk. Older registered APKs are also in
 work/apks. jadx is available for targeted decompilation and inspection.
+The jadx launcher serializes invocations and caps each JVM heap at 4 GiB.
+Use that launcher, avoid parallel decompilation, and retain the managed Gradle
+cache in GRADLE_USER_HOME. Do not bypass the resource limits or start the
+underlying jadx launcher directly.
 
 Inspect the candidate's actual tablet-mode decision and alternate-device login
 entry logic before registering Hook descriptors. APK strings, decompiled comments,

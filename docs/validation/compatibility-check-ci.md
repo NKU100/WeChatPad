@@ -102,3 +102,6 @@ age --decrypt --identity ~/.config/wechatpad/ci-trace.agekey \
 可信 action 在模型运行期间每分钟上传 `wechatpad-codex-live-*` artifact，包含本轮新增的完整密文分段与 runner 的内存、磁盘、进程名和 cgroup 计数；上传凭据不会传给模型。
 正常结束仍保留完整 `session.jsonl.age`。异常结束时按分段文件名排序分别解密即可恢复已上传的前缀，未形成完整分段或尚未上传的尾部可能丢失。
 SIGTERM/SIGINT 会触发控制器诊断和加密收尾；SIGKILL、runner 丢失或平台终止整个 action 时，只能依靠此前已上传的快照，不保证最后一次上传成功。
+
+JADX 启动器使用共享文件锁串行执行反编译，JVM 堆上限为 4 GiB、反编译线程数默认为 2，避免多个反编译进程按整机内存比例同时分配堆。
+实时快照同时读取实际进程的 cgroup 内存计数，并尽力采集本轮内核日志和 runner 服务日志；服务日志可能包含凭据，只上传 `runner-logs.json.age` 密文，不上传原始内容。日志不可读时明确记录 `unavailable`。

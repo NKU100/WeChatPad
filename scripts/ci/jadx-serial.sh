@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+: "${WECHATPAD_JADX_LOCK:?JADX lock must be configured by the trusted controller}"
+# A shared lock covers commands launched concurrently by separate model tools.
+exec flock "$WECHATPAD_JADX_LOCK" env JAVA_OPTS='-Xms256m -Xmx4g' JADX_OPTS='' \
+  "$(dirname "$0")/jadx.real" -j 2 "$@"

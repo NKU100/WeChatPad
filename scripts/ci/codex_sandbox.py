@@ -20,6 +20,7 @@ def model_command(directory, env, command):
     env['HOME'] = str(home)
     env['GRADLE_USER_HOME'] = str(gradle)
     env['TMPDIR'] = '/tmp'
+    env['WECHATPAD_JADX_LOCK'] = str(workspace / 'work/analysis/jadx.lock')
     args = ['bwrap', '--die-with-parent', '--new-session', '--unshare-pid',
             '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp']
     mounted = []
