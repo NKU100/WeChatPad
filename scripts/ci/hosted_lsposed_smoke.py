@@ -150,7 +150,6 @@ def bootstrap_magisk():
 
 
 def configure_manager():
-    adb('install', '-r', str(ROOT / 'manager.apk'), timeout=120)
     adb('shell', 'am', 'start', '-n', 'org.lsposed.manager/.ui.activity.MainActivity')
     for _ in range(10):
         _, ui = snapshot('manager-current')
@@ -206,6 +205,8 @@ def main():
         save('lsposed-install.txt', result)
         if result.returncode:
             raise RuntimeError('Official LSPosed installer failed; see lsposed-install.txt')
+        save('module-install.txt', adb('install', '-r', str(ROOT / 'module/app-debug.apk'), timeout=120))
+        save('manager-install.txt', adb('install', '-r', str(ROOT / 'manager.apk'), timeout=120))
         reboot()
         stage = 'FRAMEWORK_START'
         for _ in range(45):
@@ -217,7 +218,6 @@ def main():
         else:
             raise RuntimeError('LSPosed daemon did not start after reboot')
         stage = 'MODULE_ENABLE'
-        save('module-install.txt', adb('install', '-r', str(ROOT / 'module/app-debug.apk'), timeout=120))
         configure_manager()
         stage = 'HOOK_AND_LOGIN'
         adb('shell', 'pm', 'clear', WECHAT)

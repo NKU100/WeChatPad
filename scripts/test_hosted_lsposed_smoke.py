@@ -4,6 +4,8 @@ import unittest
 from unittest.mock import patch
 import subprocess
 import tempfile
+from contextlib import ExitStack, redirect_stdout
+import io
 
 spec = importlib.util.spec_from_file_location('smoke', Path(__file__).parent / 'ci/hosted_lsposed_smoke.py')
 smoke = importlib.util.module_from_spec(spec)
@@ -21,6 +23,30 @@ class UiEvidenceTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder, patch.object(smoke, "EVIDENCE", Path(folder)), patch.object(smoke, "adb", return_value=result) as device:
             smoke.snapshot("probe")
         self.assertTrue(any("UiHierarchy" in call.args for call in device.call_args_list))
+
+    def test_manager_and_module_are_installed_before_framework_reboot(self):
+        events = []
+        result = subprocess.CompletedProcess([], 0, b'123', b'')
+        with ExitStack() as stack:
+            folder = stack.enter_context(tempfile.TemporaryDirectory())
+            stack.enter_context(patch.object(smoke, 'EVIDENCE', Path(folder)))
+            stack.enter_context(patch.object(smoke, 'adb', side_effect=lambda *args, **kwargs: (events.append(args), result)[1]))
+            stack.enter_context(patch.object(smoke, 'su', return_value=result))
+            stack.enter_context(patch.object(smoke, 'save'))
+            stack.enter_context(patch.object(smoke, 'mobile_input', return_value='<hierarchy />'))
+            stack.enter_context(patch.object(smoke, 'bootstrap_magisk'))
+            stack.enter_context(patch.object(smoke, 'enable_page_size_backcompat'))
+            stack.enter_context(patch.object(smoke, 'configure_manager'))
+            stack.enter_context(patch.object(smoke, 'collect_logs', return_value=''))
+            stack.enter_context(patch.object(smoke, 'snapshot', return_value=('', '')))
+            stack.enter_context(patch.object(smoke, 'reboot', side_effect=lambda: events.append(('reboot',))))
+            stack.enter_context(redirect_stdout(io.StringIO()))
+            self.assertEqual(smoke.main(), 1)
+        restart = events.index(('reboot',))
+        for apk in ('manager.apk', 'module/app-debug.apk'):
+            install = next((i for i, args in enumerate(events) if args[0] == 'install' and args[-1].endswith(apk)), None)
+            self.assertIsNotNone(install, apk)
+            self.assertLess(install, restart, apk)
 
     def test_launcher_is_not_wechat(self):
         self.assertFalse(smoke.has_wechat_ui('<hierarchy><node package="com.google.android.apps.nexuslauncher" /></hierarchy>'))
