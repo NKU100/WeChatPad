@@ -1,6 +1,6 @@
 # 兼容检测 CI
 
-工作流 `Check WeChat compatibility` 只由 GitHub Actions 手动触发，不设每日计划。它从微信官网首页发现最高版本的 ARM64 APK 候选，并按候选版本选择静态回归窗口。新候选加上版本码最高的两个已正式支持旧版；候选已正式支持时检查最近三个正式支持版本。报告会列明本次实际检查的版本，历史 profile 不会因此从清单移除。
+工作流 `Check WeChat compatibility` 每天北京时间 10:23（UTC 02:23）自动触发，也可手动运行。它从微信官网首页发现最高版本的 ARM64 APK 候选。已正式支持且 APK 摘要未变化时提前结束，不启动静态矩阵、构建、Codex 或 AVD；手动选中 `force_recheck` 可重新静态检查。需要分析时再按候选版本选择静态回归窗口：新候选加上版本码最高的两个已正式支持旧版，已支持候选检查最近三个正式支持版本。报告列明本次实际检查的版本，历史 profile 保留。
 
 ## 检查流程
 
@@ -19,11 +19,11 @@
 
 候选发现或下载失败会生成 `FETCH_FAILED` 报告；profile 清单或回归窗口无效会生成 `BASELINE_INVALID`；已登记回归失败会生成 `STATIC_REGRESSION_FAILED`。未知候选需要人工分析时，`NEEDS_HOOK_REVIEW` 是可供流水线继续分支处理的结果，不会被误报为 `UNKNOWN_BUILD`。
 
-在仓库的 **Actions** 页面选择 **Check WeChat compatibility**，再点 **Run workflow** 即可运行。工作流不使用签名 Secrets，不启动 AVD，也不安装 Magisk/LSPosed。
+在仓库的 **Actions** 页面选择 **Check WeChat compatibility**，再点 **Run workflow** 即可运行。静态检测不使用签名 Secrets；新候选的后续托管冒烟会安装 Magisk/LSPosed 并启动 AVD。
 
 ## Codex 适配
 
-`Run workflow` 中的 `run_codex` 默认为开启，只在主分支手动运行中发现可信的未登记构建时调用模型。关闭该选项可只运行静态检测。每个构建以版本码和完整 APK SHA-256 创建一次 Issue 记录；已有记录即跳过，失败或超时不会自动再次调用模型。任务串行运行，固定使用 `gpt-6-luna` 和 `xhigh`，关闭多代理能力，不自动升级模型。不设置模型进程或适配 job 的额外时间上限；任务仍受 GitHub Actions 平台限制，单次适配的订阅消耗取决于实际工作量。
+`Run workflow` 中的 `run_codex` 默认为开启，只在主分支手动或定时运行中发现可信的未登记构建时调用模型。关闭该选项可只运行静态检测。每个构建以版本码和完整 APK SHA-256 创建一次 Issue 记录；已有记录即跳过，失败或超时不会自动再次调用模型。任务串行运行，固定使用 `gpt-6-luna` 和 `xhigh`，关闭多代理能力，不自动升级模型。不设置模型进程或适配 job 的额外时间上限；任务仍受 GitHub Actions 平台限制，单次适配的订阅消耗取决于实际工作量。
 
 模型在隔离 checkout 中检查真实 APK，可使用 jadx。控制器拒绝修改既有 profile、检查器、脚本、工作流和构建配置。新增 profile 必须使用已校验的身份和来源，状态只能为 `static-verified`。候选和最多两个较早正式支持版本分别经过共用检查器；核心测试、模块测试和 debug APK 构建通过后才发布 draft PR，并把 Issue 状态更新为 `WAITING_RUNTIME`。模型失败或静态检查失败时，Issue 和结果报告停留在 `NEEDS_HOOK_REVIEW`。
 
@@ -31,7 +31,7 @@ PR 分支包含静态适配。流水线随后自动执行托管 AVD 登录界面
 
 ## 订阅认证配置
 
-此流程使用 ChatGPT 管理的 Codex 登录，不使用 OpenAI API Key；它消耗订阅中的 Codex 用量。仅在主分支手动触发的可信工作流中使用；PR 或 fork 不可触发认证恢复。需要两个 Actions Secrets：
+此流程使用 ChatGPT 管理的 Codex 登录，不使用 OpenAI API Key；它消耗订阅中的 Codex 用量。仅在主分支手动或定时触发的可信工作流中使用；PR 或 fork 不可触发认证恢复。需要两个 Actions Secrets：
 
 | Secret | 用途 |
 |---|---|
@@ -58,7 +58,7 @@ runner 在模型调用前恢复凭据，之后即使模型失败也写回刷新�
 
 ## 托管运行时验证
 
-兼容检测由主分支手动触发。Codex 适配的静态检查和构建成功后，同一次运行调用 `hosted-lsposed-smoke.yml`，复用已校验的微信 APK 和模块 APK。托管 AVD 使用固定系统镜像、修补 ramdisk、Magisk 和官方 LSPosed；工作流安装框架、启用模块并验证无模块基线。
+兼容检测由主分支手动或定时触发。Codex 适配的静态检查和构建成功后，同一次运行调用 `hosted-lsposed-smoke.yml`，复用已校验的微信 APK 和模块 APK。托管 AVD 使用固定系统镜像、修补 ramdisk、Magisk 和官方 LSPosed；工作流安装框架、启用模块并验证无模块基线。
 
 通过标准为模块注入成功、Hook 安装无错误、Phone & Tablet 登录入口出现，且可进入稳定的二维码页。无需扫码、登录账号或验证双设备服务器会话。
 
