@@ -565,6 +565,7 @@ jobs:
         run: |
           set -euo pipefail
           npm install --global @openai/codex@0.160.1
+          npm install --prefix "$CONTROLLER_ROOT" --ignore-scripts @actions/artifact@6.3.1
           sudo apt-get update
           sudo apt-get install --yes age
           curl --fail --silent --show-error --location --retry 3 \
@@ -641,11 +642,12 @@ jobs:
           CODEX_HOME: ${{ runner.temp }}/wechatpad-codex-auth
           GOAL_TOKEN_BUDGET: ${{ inputs.goal_token_budget || '200000' }}
           CODEX_TRACE_RECIPIENT: ${{ vars.CODEX_TRACE_RECIPIENT }}
-        run: |
-          cd "$CONTROLLER_ROOT"
-          python3 -m scripts.ci.codex_adaptation model \
-            --directory "$CODEX_TASK_DIR" --prompt "$CONTROLLER_ROOT/adapt-wechat.md" \
-            --goal-token-budget "$GOAL_TOKEN_BUDGET"
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const {pathToFileURL} = require('node:url');
+            const {run} = await import(pathToFileURL(process.env.CONTROLLER_ROOT + '/scripts/ci/codex_live.mjs').href);
+            await run(core);
 
       - name: Persist refreshed authentication even after model failure
         if: always() && steps.restore-auth.outcome == 'success'
@@ -752,6 +754,7 @@ jobs:
             ${{ runner.temp }}/wechatpad-adaptation/adaptation.patch
             ${{ runner.temp }}/wechatpad-adaptation/goal-diagnostics.json
             ${{ runner.temp }}/wechatpad-adaptation/session.jsonl.age
+            ${{ runner.temp }}/wechatpad-adaptation/trace-chunks/*.age
           if-no-files-found: warn
           retention-days: 14
 

@@ -11,6 +11,12 @@ class EncryptedTrace:
         self.path = directory / 'session.jsonl.age'
         self.partial = directory / 'session.jsonl.age.partial'
         self.closed = False
+        self.recipient = recipient
+        self.pending = []
+        self.pending_bytes = 0
+        self.chunk_number = 0
+        self.chunks = directory / 'trace-chunks'
+        self.chunks.mkdir(mode=0o700, exist_ok=True)
         self.path.unlink(missing_ok=True)
         self.partial.unlink(missing_ok=True)
         if not re.fullmatch(r'age1[0-9a-z]{58}', recipient):
@@ -34,11 +40,34 @@ class EncryptedTrace:
         record = {'timestamp': datetime.now(timezone.utc).isoformat(),
                   'direction': direction, 'message': message}
         try:
-            self.process.stdin.write((json.dumps(record, ensure_ascii=False) + '\n').encode())
+            encoded = (json.dumps(record, ensure_ascii=False) + '\n').encode()
+            self.process.stdin.write(encoded)
             self.process.stdin.flush()
+            self.pending.append(encoded)
+            self.pending_bytes += len(encoded)
+            if len(self.pending) >= 32 or self.pending_bytes >= 1024 * 1024:
+                self.checkpoint()
         except (BrokenPipeError, OSError):
             self._discard()
             raise RuntimeError('Session encryption failed; encrypted artifact discarded') from None
+
+    def checkpoint(self):
+        if not self.pending:
+            return
+        self.chunk_number += 1
+        path = self.chunks / f'{self.chunk_number:06d}.jsonl.age'
+        partial = path.with_suffix('.age.partial')
+        try:
+            with os.fdopen(os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'wb') as output:
+                subprocess.run(['age', '--encrypt', '-r', self.recipient],
+                               input=b''.join(self.pending), stdout=output,
+                               stderr=subprocess.DEVNULL, timeout=30, check=True,
+                               start_new_session=True)
+            partial.replace(path)
+            self.pending.clear()
+            self.pending_bytes = 0
+        finally:
+            partial.unlink(missing_ok=True)
 
     def _discard(self):
         self.closed = True
@@ -56,6 +85,7 @@ class EncryptedTrace:
         if self.closed:
             return
         try:
+            self.checkpoint()
             self.process.stdin.close()
             if self.process.wait(timeout=30):
                 raise RuntimeError('Session encryption failed')

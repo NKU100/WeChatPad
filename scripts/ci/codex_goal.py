@@ -134,6 +134,8 @@ class AppServer:
 
     def close(self):
         if self.process is not None and self.process.poll() is None:
+            if os.getpgid(self.process.pid) == os.getpgrp():
+                raise RuntimeError('Refusing to terminate the controller process group')
             os.killpg(self.process.pid, signal.SIGTERM)
             try:
                 self.process.wait(timeout=10)
@@ -237,6 +239,9 @@ def run_model_goal(directory, prompt_path, token_budget):
     if type(token_budget) is not int or token_budget <= 0:
         raise ValueError('Goal token budget must be a positive integer')
     client = None
+    def interrupted(number, frame):
+        raise InterruptedError(f'Controller received signal {number}')
+    handlers = {number: signal.signal(number, interrupted) for number in [signal.SIGTERM, signal.SIGINT]}
     try:
         client = AppServer(directory, env)
         run_goal(client, directory, prompt_path.read_text(), token_budget)
@@ -251,5 +256,7 @@ def run_model_goal(directory, prompt_path, token_budget):
         path.write_text(json.dumps(diagnostics, indent=2) + '\n')
         raise
     finally:
+        for number, handler in handlers.items():
+            signal.signal(number, handler)
         if client is not None:
             client.close()

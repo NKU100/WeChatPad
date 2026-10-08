@@ -45,7 +45,7 @@ class EncryptedTraceTest(unittest.TestCase):
             trace.close()
             encrypted = directory / 'session.jsonl.age'
             self.assertNotIn(b'sensitive prompt', encrypted.read_bytes())
-            self.assertEqual({'identity', 'session.jsonl.age'}, {p.name for p in directory.iterdir()})
+            self.assertEqual({'identity', 'session.jsonl.age', 'trace-chunks'}, {p.name for p in directory.iterdir()})
             records = [json.loads(line) for line in subprocess.check_output(['age', '-d', '-i', str(key), str(encrypted)], text=True).splitlines()]
             self.assertEqual(['request', 'response'], [record['direction'] for record in records])
             self.assertEqual('sensitive prompt', records[0]['message']['params']['text'])
@@ -57,12 +57,32 @@ class EncryptedTraceTest(unittest.TestCase):
             self.assertNotEqual(0, result.returncode)
             self.assertEqual(b'', result.stdout)
 
+    def test_completed_chunks_survive_interrupted_main_stream(self):
+        with tempfile.TemporaryDirectory() as root:
+            directory = Path(root)
+            key = directory / 'identity'
+            subprocess.run(['age-keygen', '-o', str(key)], check=True, capture_output=True)
+            recipient = subprocess.check_output(['age-keygen', '-y', str(key)], text=True).strip()
+            trace = EncryptedTrace(directory, recipient)
+            for number in range(32):
+                trace.record('response', {'number': number, 'text': 'private output'})
+            chunk = next((directory / 'trace-chunks').glob('*.age'))
+            self.assertNotIn(b'private output', chunk.read_bytes())
+            trace.process.kill()
+            trace.process.wait()
+            with self.assertRaises(RuntimeError):
+                trace.close()
+            records = [json.loads(line) for line in subprocess.check_output(
+                ['age', '-d', '-i', str(key), str(chunk)], text=True).splitlines()]
+            self.assertEqual(list(range(32)), [r['message']['number'] for r in records])
+            self.assertFalse((directory / 'session.jsonl.age').exists())
+
     def test_invalid_recipient_leaves_no_uploadable_file(self):
         with tempfile.TemporaryDirectory() as root:
             directory = Path(root)
             with self.assertRaises(ValueError):
                 EncryptedTrace(directory, 'not-a-public-key')
-            self.assertEqual([], list(directory.iterdir()))
+            self.assertFalse(any(directory.rglob('*.age')))
 
     def test_failed_encryption_removes_partial_artifact(self):
         with tempfile.TemporaryDirectory() as root:

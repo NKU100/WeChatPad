@@ -97,3 +97,8 @@ age --decrypt --identity ~/.config/wechatpad/ci-trace.agekey \
 `runtime-validation.yml` 可手动用官网最新且已登记的精确 APK 重放构建、静态检查、跨任务 artifact、托管冒烟和结果判定；不调用 Codex，不创建 PR 或修改正式支持清单。
 
 勾选 `rebuild_ramdisk` 可同时从官方输入重建 root ramdisk，校验与 Release 产物逐字节一致，再执行冒烟。制作步骤及本地命令见 [AVD root ramdisk 制作](../environment/ramdisk-build.md)。
+
+会话记录另按最多 32 条事件或 1 MiB 明文缓冲划分为独立 age 密文分段，不落地明文。
+可信 action 在模型运行期间每分钟上传 `wechatpad-codex-live-*` artifact，包含本轮新增的完整密文分段与 runner 的内存、磁盘、进程名和 cgroup 计数；上传凭据不会传给模型。
+正常结束仍保留完整 `session.jsonl.age`。异常结束时按分段文件名排序分别解密即可恢复已上传的前缀，未形成完整分段或尚未上传的尾部可能丢失。
+SIGTERM/SIGINT 会触发控制器诊断和加密收尾；SIGKILL、runner 丢失或平台终止整个 action 时，只能依靠此前已上传的快照，不保证最后一次上传成功。
