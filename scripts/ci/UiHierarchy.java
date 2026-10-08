@@ -16,8 +16,9 @@ public final class UiHierarchy {
 
     private static void node(XmlSerializer xml, AccessibilityNodeInfo item, int depth)
             throws Exception {
-        if (depth > 64 || !item.isVisibleToUser()) return;
+        if (depth > 64) return;
         xml.startTag(null, "node");
+        xml.attribute(null, "visible", Boolean.toString(item.isVisibleToUser()));
         xml.attribute(null, "package", text(item.getPackageName()));
         xml.attribute(null, "text", text(item.getText()));
         xml.attribute(null, "content-desc", text(item.getContentDescription()));

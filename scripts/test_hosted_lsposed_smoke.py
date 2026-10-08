@@ -49,6 +49,10 @@ class UiEvidenceTest(unittest.TestCase):
             self.assertIsNotNone(install, apk)
             self.assertLess(install, restart, apk)
 
+    def test_hidden_nodes_are_not_click_targets(self):
+        xml = '<hierarchy><node text="Modules" visible="false"/><node text="Modules" visible="true" bounds="[0,0][10,10]"/></hierarchy>'
+        self.assertEqual(smoke.unique_node(xml, lambda n: n.get("text") == "Modules").get("visible"), "true")
+
     def test_launcher_is_not_wechat(self):
         self.assertFalse(smoke.has_wechat_ui('<hierarchy><node package="com.google.android.apps.nexuslauncher" /></hierarchy>'))
 

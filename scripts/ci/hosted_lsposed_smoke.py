@@ -64,7 +64,7 @@ def qr_page_ready(activity, xml):
 
 
 def unique_node(xml, predicate):
-    matches = [node for node in nodes(xml) if predicate(node)]
+    matches = [node for node in nodes(xml) if node.get('visible') != 'false' and predicate(node)]
     if len(matches) > 1:
         raise ValueError(f'UI selector is ambiguous ({len(matches)} matches)')
     return matches[0] if matches else None
