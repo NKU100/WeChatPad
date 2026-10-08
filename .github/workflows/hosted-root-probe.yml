@@ -1,0 +1,65 @@
+name: Probe locally patched hosted ramdisk
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hosted-root-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+      - name: Download locally patched ramdisk
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p work/root-probe/evidence
+          gh release download experimental-ramdisk-api35-r09-magisk30.7 \
+            --pattern ramdisk-patched.img --dir work/root-probe
+          echo '8f1157daa762ce32a6bb22b7ca88c24fe42aac1aa380be7c82333960f9ef50b7  work/root-probe/ramdisk-patched.img' | sha256sum --check
+      - name: Enable KVM access
+        run: |
+          test -c /dev/kvm
+          sudo chmod 666 /dev/kvm
+      - name: Boot patched ramdisk and verify Magisk
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_5
+          ram-size: 2048M
+          disk-size: 4096M
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none -no-snapshot
+          pre-emulator-launch-script: |
+            echo 'ed02243242916aaa878b880f3eaa7ace1b44406747cdfecd585ad14ea0464fd5  '"$ANDROID_HOME/system-images/android-35/google_apis/x86_64/ramdisk.img" | sha256sum --check
+            cp work/root-probe/ramdisk-patched.img "$ANDROID_HOME/system-images/android-35/google_apis/x86_64/ramdisk.img"
+          script: bash scripts/ci/hosted_root_probe.sh
+      - name: Upload root evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: hosted-root-probe
+          path: work/root-probe/evidence/
+          retention-days: 7
+      - name: Summarize root probe
+        if: always()
+        run: |
+          if [[ -f work/root-probe/evidence/root-verified.txt ]]; then
+            echo 'Patched x86_64 ramdisk booted. Magisk daemon and shell su root were verified; LSPosed was not tested.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Root probe did not pass. Inspect emulator logs and root evidence.' >> "$GITHUB_STEP_SUMMARY"
+          fi
