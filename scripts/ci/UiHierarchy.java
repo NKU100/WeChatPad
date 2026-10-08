@@ -1,4 +1,5 @@
 import android.app.UiAutomation;
+import android.accessibilityservice.AccessibilityServiceInfo;
 import android.graphics.Rect;
 import android.os.HandlerThread;
 import android.os.Looper;
@@ -50,6 +51,10 @@ public final class UiHierarchy {
                 .newInstance(thread.getLooper(), connection);
         try {
             UiAutomation.class.getDeclaredMethod("connect", int.class).invoke(automation, 0);
+            AccessibilityServiceInfo service = automation.getServiceInfo();
+            service.flags |= AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
+                    | AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS;
+            automation.setServiceInfo(service);
             AccessibilityNodeInfo root = null;
             for (int i = 0; i < 20 && root == null; i++) {
                 root = automation.getRootInActiveWindow();
