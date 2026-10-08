@@ -53,6 +53,15 @@ class UiEvidenceTest(unittest.TestCase):
         xml = '<hierarchy><node text="Modules" visible="false"/><node text="Modules" visible="true" bounds="[0,0][10,10]"/></hierarchy>'
         self.assertEqual(smoke.unique_node(xml, lambda n: n.get("text") == "Modules").get("visible"), "true")
 
+    def test_ocr_target_requires_unique_confident_text(self):
+        tsv = 'level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n'
+        line = '5\t1\t1\t1\t1\t1\t50\t70\t140\t30\t96\tWeChatPad\n'
+        target = smoke.ocr_target(tsv + line, 'WeChatPad')
+        self.assertEqual(target.get('bounds'), '[50,70][190,100]')
+        self.assertIsNone(smoke.ocr_target(tsv + line.replace('96', '20'), 'WeChatPad'))
+        with self.assertRaisesRegex(ValueError, 'ambiguous'):
+            smoke.ocr_target(tsv + line + line.replace('5\t1\t1\t1\t1\t1', '5\t1\t2\t1\t1\t1'), 'WeChatPad')
+
     def test_launcher_is_not_wechat(self):
         self.assertFalse(smoke.has_wechat_ui('<hierarchy><node package="com.google.android.apps.nexuslauncher" /></hierarchy>'))
 

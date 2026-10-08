@@ -1,6 +1,8 @@
 """Probe official LSPosed and WeChat login UI on a disposable hosted AVD."""
 
 import json
+import csv
+import io
 from pathlib import Path
 import re
 import shlex
@@ -68,6 +70,34 @@ def unique_node(xml, predicate):
     if len(matches) > 1:
         raise ValueError(f'UI selector is ambiguous ({len(matches)} matches)')
     return matches[0] if matches else None
+
+
+def ocr_target(tsv, label):
+    lines = {}
+    for word in csv.DictReader(io.StringIO(tsv), delimiter='\t'):
+        if word['level'] != '5' or not word['text'].strip():
+            continue
+        key = tuple(word[field] for field in ('page_num', 'block_num', 'par_num', 'line_num'))
+        lines.setdefault(key, []).append(word)
+    matches = []
+    for words in lines.values():
+        text = ' '.join(word['text'] for word in words)
+        if text.casefold() != label.casefold() or any(float(word['conf']) < 70 for word in words):
+            continue
+        left = min(int(word['left']) for word in words)
+        top = min(int(word['top']) for word in words)
+        right = max(int(word['left']) + int(word['width']) for word in words)
+        bottom = max(int(word['top']) + int(word['height']) for word in words)
+        matches.append(ET.Element('node', {'text': text, 'bounds': f'[{left},{top}][{right},{bottom}]'}))
+    if len(matches) > 1:
+        raise ValueError(f'OCR selector is ambiguous ({len(matches)} matches)')
+    return matches[0] if matches else None
+
+
+def manager_ocr():
+    result = run('tesseract', str(EVIDENCE / 'manager-current.png'), 'stdout', '--psm', '11', 'tsv')
+    save('manager-current-ocr.tsv', result)
+    return result.stdout.decode(errors='replace')
 
 
 def snapshot(label):
@@ -162,7 +192,16 @@ def configure_manager():
             if enabled is None or enabled.get('checked') != 'true':
                 raise RuntimeError('Manager did not confirm WeChatPad enabled')
             return
+        tsv = manager_ocr()
+        enable = ocr_target(tsv, 'Enable module')
+        if enable is not None:
+            tap(enable)
+            snapshot('manager-enable-requested')
+            # The final hook logs and QR page verify that enabling took effect.
+            return
         node = unique_node(ui, lambda n: n.get('text') == 'WeChatPad')
+        if node is None:
+            node = ocr_target(tsv, 'WeChatPad')
         if node is None:
             node = unique_node(ui, lambda n: n.get('text') == 'Modules' or n.get('content-desc') == 'Modules')
         if node is not None:
