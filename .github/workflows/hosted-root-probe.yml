@@ -27,9 +27,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p work/root-probe/evidence
-          gh release download experimental-ramdisk-api35-r09-magisk30.7 \
-            --pattern ramdisk-patched.img --dir work/root-probe
-          echo '8f1157daa762ce32a6bb22b7ca88c24fe42aac1aa380be7c82333960f9ef50b7  work/root-probe/ramdisk-patched.img' | sha256sum --check
+          gh release download experimental-ramdisk-api37.2-r06-magisk31.0 \
+            --pattern ramdisk37-patched.img --dir work/root-probe
+          echo 'b49fec2e291582495196d9437bf520f337882bddf763d2530a576f3e4da99df8  work/root-probe/ramdisk37-patched.img' | sha256sum --check
       - name: Enable KVM access
         run: |
           test -c /dev/kvm
@@ -37,16 +37,17 @@ jobs:
       - name: Boot patched ramdisk and verify Magisk
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 35
-          target: google_apis
+          api-level: '37.2'
+          emulator-build: '15917651'
+          target: google_apis_ps16k
           arch: x86_64
           profile: pixel_5
           ram-size: 2048M
           disk-size: 4096M
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none -no-snapshot
           pre-emulator-launch-script: |
-            echo 'ed02243242916aaa878b880f3eaa7ace1b44406747cdfecd585ad14ea0464fd5  '"$ANDROID_HOME/system-images/android-35/google_apis/x86_64/ramdisk.img" | sha256sum --check
-            cp work/root-probe/ramdisk-patched.img "$ANDROID_HOME/system-images/android-35/google_apis/x86_64/ramdisk.img"
+            echo 'a6ee489afea9e28428ceb83d8a0cb55e4ab08cfc755ae2d1f34aff35e1e55038  '"$ANDROID_HOME/system-images/android-37.2/google_apis_ps16k/x86_64/ramdisk.img" | sha256sum --check
+            cp work/root-probe/ramdisk37-patched.img "$ANDROID_HOME/system-images/android-37.2/google_apis_ps16k/x86_64/ramdisk.img"
           script: bash scripts/ci/hosted_root_probe.sh
       - name: Upload root evidence
         if: always()
