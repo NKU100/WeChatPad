@@ -674,7 +674,7 @@ jobs:
           arch: x86_64
           profile: pixel_5
           cores: 2
-          ram-size: 2048M
+          ram-size: 4096M
           disk-size: 6144M
           emulator-options: -no-window -gpu swiftshader_indirect -feature GLDirectMem,HasSharedSlotsHostMemoryAllocator -noaudio -no-boot-anim -camera-back none -camera-front none -no-snapshot
           pre-emulator-launch-script: bash scripts/ci/prepare_avd_ramdisk.sh
