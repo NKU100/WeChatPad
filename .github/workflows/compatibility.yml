@@ -550,14 +550,8 @@ jobs:
         if: steps.claim.outputs.claimed == 'true'
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y bubblewrap apparmor-profiles apparmor-utils
-          if [[ ! -f /etc/apparmor.d/bwrap-userns-restrict && -f /usr/share/apparmor/extra-profiles/bwrap-userns-restrict ]]; then
-            sudo install -m 0644 /usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/bwrap-userns-restrict
-          fi
-          if [[ -f /etc/apparmor.d/bwrap-userns-restrict ]]; then
-            sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
-          fi
-          # AppArmor otherwise rejects Codex's nested namespace inside the outer mount sandbox.
+          sudo apt-get install -y bubblewrap
+          # The restrictive example AppArmor profile strips capabilities needed by nested sandboxes.
           if [[ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]]; then
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
