@@ -58,10 +58,10 @@ runner 在模型调用前恢复凭据，之后即使模型失败也写回刷新�
 
 ## 托管运行时验证
 
-兼容检测由主分支手动或定时触发。Codex 适配的静态检查和构建成功后，同一次运行调用 `hosted-lsposed-smoke.yml`，复用已校验的微信 APK 和模块 APK。托管 AVD 使用固定系统镜像、修补 ramdisk、Magisk 和官方 LSPosed；工作流安装框架、启用模块并验证无模块基线。
+兼容检测由主分支手动或定时触发。Codex 适配的静态检查和构建成功后，同一次运行调用 `runtime-smoke.yml`，复用已校验的微信 APK 和模块 APK。托管 AVD 使用固定系统镜像、修补 ramdisk、Magisk 和官方 LSPosed；工作流安装框架、启用模块并验证无模块基线。
 
 通过标准为模块注入成功、Hook 安装无错误、Phone & Tablet 登录入口出现，且可进入稳定的二维码页。无需扫码、登录账号或验证双设备服务器会话。
 
 成功输出 `RUNTIME_VERIFIED`，更新候选为 `runtime-verified-hosted`，记录 PR 和 Issue；合并后才正式支持。失败输出 `RUNTIME_REJECTED`，保持草稿 PR，并上传截图、UI 树和日志。PR 被改动时拒绝使用旧运行结果晋级。
 
-`runtime-replay.yml` 可手动用已登记的 8.0.79 重放构建、静态检查、跨任务 artifact、托管冒烟和结果判定；不调用 Codex，不创建 PR 或修改正式支持清单。
+`runtime-validation.yml` 可手动用已登记的 8.0.79 重放构建、静态检查、跨任务 artifact、托管冒烟和结果判定；不调用 Codex，不创建 PR 或修改正式支持清单。

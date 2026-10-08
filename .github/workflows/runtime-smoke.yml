@@ -1,4 +1,4 @@
-name: Probe hosted LSPosed WeChat smoke
+name: Run WeChat runtime smoke
 
 on:
   workflow_dispatch:
@@ -6,7 +6,6 @@ on:
       module_run_id:
         description: Successful Build module APK run to reuse
         type: string
-        default: '37650997867'
         required: true
 
   workflow_call:
@@ -26,7 +25,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: hosted-lsposed-smoke
+  group: wechatpad-runtime-smoke
   cancel-in-progress: false
 
 jobs:
@@ -36,10 +35,10 @@ jobs:
       - uses: actions/checkout@v7
       - name: Reserve space for Android system and userdata
         run: |
-          mkdir -p work/hosted-lsp/evidence
-          df -h . | tee work/hosted-lsp/evidence/disk-before.txt
+          mkdir -p work/runtime-smoke/evidence
+          df -h . | tee work/runtime-smoke/evidence/disk-before.txt
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost
-          df -h . | tee work/hosted-lsp/evidence/disk-after.txt
+          df -h . | tee work/runtime-smoke/evidence/disk-after.txt
       - name: Install local OCR for Manager UI
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends tesseract-ocr
       - uses: actions/setup-java@v6
@@ -53,7 +52,7 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: ${{ inputs.module_artifact || 'wechatpad-module-apk' }}
-          path: work/hosted-lsp/module
+          path: work/runtime-smoke/module
           run-id: ${{ inputs.module_run_id }}
           github-token: ${{ github.token }}
       - name: Download pinned root and official LSPosed
@@ -61,20 +60,20 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release download experimental-ramdisk-api37.2-r06-magisk31.0 \
-            --pattern ramdisk37-patched.img --pattern LSPosed-v2.2.0-7854-release.zip --dir work/hosted-lsp
-          echo 'b49fec2e291582495196d9437bf520f337882bddf763d2530a576f3e4da99df8  work/hosted-lsp/ramdisk37-patched.img' | sha256sum --check
-          echo '725915707f88a4f5ebecddab908cb217aa0a6d98955db5885bc9fadda81e75b8  work/hosted-lsp/LSPosed-v2.2.0-7854-release.zip' | sha256sum --check
-          mv work/hosted-lsp/LSPosed-v2.2.0-7854-release.zip work/hosted-lsp/lsposed.zip
-          7z e -so work/hosted-lsp/lsposed.zip manager.apk > work/hosted-lsp/manager.apk
+            --pattern ramdisk37-patched.img --pattern LSPosed-v2.2.0-7854-release.zip --dir work/runtime-smoke
+          echo 'b49fec2e291582495196d9437bf520f337882bddf763d2530a576f3e4da99df8  work/runtime-smoke/ramdisk37-patched.img' | sha256sum --check
+          echo '725915707f88a4f5ebecddab908cb217aa0a6d98955db5885bc9fadda81e75b8  work/runtime-smoke/LSPosed-v2.2.0-7854-release.zip' | sha256sum --check
+          mv work/runtime-smoke/LSPosed-v2.2.0-7854-release.zip work/runtime-smoke/lsposed.zip
+          7z e -so work/runtime-smoke/lsposed.zip manager.apk > work/runtime-smoke/manager.apk
           curl --fail --location --silent --show-error --retry 2 --connect-timeout 20 --max-time 180 \
-            --proto '=https' --proto-redir '=https' https://github.com/topjohnwu/Magisk/releases/download/v31.0/Magisk-v31.0.apk -o work/hosted-lsp/magisk.apk
-          echo '2c8a488b9a5293e578e95ae4f07e3c57aba4feec4a52ca4dd852a2692d6dd4e8  work/hosted-lsp/magisk.apk' | sha256sum --check
+            --proto '=https' --proto-redir '=https' https://github.com/topjohnwu/Magisk/releases/download/v31.0/Magisk-v31.0.apk -o work/runtime-smoke/magisk.apk
+          echo '2c8a488b9a5293e578e95ae4f07e3c57aba4feec4a52ca4dd852a2692d6dd4e8  work/runtime-smoke/magisk.apk' | sha256sum --check
       - name: Reuse statically verified candidate
         if: inputs.candidate_artifact != ''
         uses: actions/download-artifact@v8
         with:
           name: ${{ inputs.candidate_artifact }}
-          path: work/hosted-lsp
+          path: work/runtime-smoke
           run-id: ${{ inputs.module_run_id }}
           github-token: ${{ github.token }}
       - name: Verify exact candidate APK
@@ -83,7 +82,7 @@ jobs:
           python3 - <<'PYVERIFY'
           import hashlib, json
           from pathlib import Path
-          root = Path('work/hosted-lsp')
+          root = Path('work/runtime-smoke')
           report = json.loads((root / 'candidate-report.json').read_text())
           assert report['status'] == 'STATIC_VERIFIED_PENDING_RUNTIME'
           expected = report['identity']
@@ -99,13 +98,13 @@ jobs:
           source_url=$(python3 -c "import json; print(next(p['sourceUrl'] for p in json.load(open('compatibility/targets.json')) if p['identity']['versionName'] == '8.0.79'))")
           source_sha=$(python3 -c "import json; print(next(p['identity']['apkSha256'] for p in json.load(open('compatibility/targets.json')) if p['identity']['versionName'] == '8.0.79'))")
           curl --fail --location --silent --show-error --retry 2 --connect-timeout 20 --max-time 300 \
-            --proto '=https' --proto-redir '=https' "$source_url" -o work/hosted-lsp/wechat.apk
-          printf '%s  %s\n' "$source_sha" work/hosted-lsp/wechat.apk | sha256sum --check
+            --proto '=https' --proto-redir '=https' "$source_url" -o work/runtime-smoke/wechat.apk
+          printf '%s  %s\n' "$source_sha" work/runtime-smoke/wechat.apk | sha256sum --check
       - name: Verify official APK signer
         run: |
           sdkmanager 'build-tools;37.0.0'
-          "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --print-certs work/hosted-lsp/wechat.apk > work/hosted-lsp/evidence/wechat-signer.txt
-          grep -F '0fe4ff85c215918396dadc7cd8ce6963339af33d37751a56e54c7206b63a3c7c' work/hosted-lsp/evidence/wechat-signer.txt
+          "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --print-certs work/runtime-smoke/wechat.apk > work/runtime-smoke/evidence/wechat-signer.txt
+          grep -F '0fe4ff85c215918396dadc7cd8ce6963339af33d37751a56e54c7206b63a3c7c' work/runtime-smoke/evidence/wechat-signer.txt
       - name: Enable KVM access
         run: |
           test -c /dev/kvm
@@ -125,27 +124,27 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -feature GLDirectMem,HasSharedSlotsHostMemoryAllocator -noaudio -no-boot-anim -camera-back none -camera-front none -no-snapshot
           pre-emulator-launch-script: |
             echo 'a6ee489afea9e28428ceb83d8a0cb55e4ab08cfc755ae2d1f34aff35e1e55038  '"$ANDROID_HOME/system-images/android-37.2/google_apis_ps16k/x86_64/ramdisk.img" | sha256sum --check
-            cp work/hosted-lsp/ramdisk37-patched.img "$ANDROID_HOME/system-images/android-37.2/google_apis_ps16k/x86_64/ramdisk.img"
+            cp work/runtime-smoke/ramdisk37-patched.img "$ANDROID_HOME/system-images/android-37.2/google_apis_ps16k/x86_64/ramdisk.img"
           script: |
-            bash scripts/ci/hosted_root_probe.sh
-            mkdir -p work/hosted-lsp/ui-classes
-            javac --release 17 -cp "$ANDROID_HOME/platforms/android-37.2/android.jar" -d work/hosted-lsp/ui-classes scripts/ci/UiHierarchy.java
-            "$ANDROID_HOME/build-tools/37.0.0/d8" --min-api 37 --lib "$ANDROID_HOME/platforms/android-37.2/android.jar" --output work/hosted-lsp/ui-hierarchy.jar work/hosted-lsp/ui-classes/UiHierarchy.class
-            python3 scripts/ci/hosted_lsposed_smoke.py
+            bash scripts/ci/verify_avd_root.sh
+            mkdir -p work/runtime-smoke/ui-classes
+            javac --release 17 -cp "$ANDROID_HOME/platforms/android-37.2/android.jar" -d work/runtime-smoke/ui-classes scripts/ci/UiHierarchy.java
+            "$ANDROID_HOME/build-tools/37.0.0/d8" --min-api 37 --lib "$ANDROID_HOME/platforms/android-37.2/android.jar" --output work/runtime-smoke/ui-hierarchy.jar work/runtime-smoke/ui-classes/UiHierarchy.class
+            python3 scripts/ci/runtime_smoke.py
       - name: Upload runtime evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: hosted-lsposed-smoke
+          name: wechatpad-runtime-smoke
           path: |
-            work/hosted-lsp/evidence/
-            work/root-probe/evidence/
+            work/runtime-smoke/evidence/
+            work/root-verification/evidence/
           retention-days: 7
       - name: Summarize runtime smoke
         if: always()
         run: |
-          if [[ -f work/hosted-lsp/evidence/summary.md ]]; then
-            cat work/hosted-lsp/evidence/summary.md >> "$GITHUB_STEP_SUMMARY"
+          if [[ -f work/runtime-smoke/evidence/summary.md ]]; then
+            cat work/runtime-smoke/evidence/summary.md >> "$GITHUB_STEP_SUMMARY"
           else
             echo 'Smoke failed during environment preparation; see setup logs.' >> "$GITHUB_STEP_SUMMARY"
           fi

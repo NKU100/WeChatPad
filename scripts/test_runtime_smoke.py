@@ -7,7 +7,7 @@ import tempfile
 from contextlib import ExitStack, redirect_stdout
 import io
 
-spec = importlib.util.spec_from_file_location('smoke', Path(__file__).parent / 'ci/hosted_lsposed_smoke.py')
+spec = importlib.util.spec_from_file_location('smoke', Path(__file__).parent / 'ci/runtime_smoke.py')
 smoke = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(smoke)
 

@@ -60,7 +60,7 @@ class CodexAdaptationTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'identity'):
             validate_profiles(self.targets, self.targets + [self.profile], self.report)
         validate_paths(['compatibility/targets.json', 'compat-core/src/main/kotlin/Hook.kt'])
-        for path in ['.github/workflows/ci.yml', 'scripts/ci/codex_adaptation.py', 'gradle.properties', 'compat-checker/src/main/kotlin/Main.kt']:
+        for path in ['.github/workflows/build.yml', 'scripts/ci/codex_adaptation.py', 'gradle.properties', 'compat-checker/src/main/kotlin/Main.kt']:
             with self.assertRaisesRegex(ValueError, 'allowed'):
                 validate_paths([path])
 

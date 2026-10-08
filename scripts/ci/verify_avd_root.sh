@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-evidence=work/root-probe/evidence
+evidence=work/root-verification/evidence
 mkdir -p "$evidence"
 trap 'adb logcat -d -v threadtime > "$evidence/logcat.txt" 2>&1 || true; adb shell getprop > "$evidence/device-properties.txt" 2>&1 || true' EXIT
 exec > >(tee "$evidence/root-check.txt") 2>&1

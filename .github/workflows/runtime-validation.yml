@@ -1,4 +1,4 @@
-name: Replay hosted runtime pipeline
+name: Validate registered WeChat runtime
 
 on:
   workflow_dispatch:
@@ -57,7 +57,7 @@ jobs:
 
   runtime:
     needs: prepare
-    uses: ./.github/workflows/hosted-lsposed-smoke.yml
+    uses: ./.github/workflows/runtime-smoke.yml
     with:
       module_run_id: ${{ github.run_id }}
       module_artifact: wechatpad-adapted-module
@@ -76,7 +76,7 @@ jobs:
       - uses: actions/download-artifact@v8
         continue-on-error: true
         with:
-          name: hosted-lsposed-smoke
+          name: wechatpad-runtime-smoke
           path: runtime-result/evidence
       - name: Validate pipeline acceptance without publishing support
         env:
@@ -87,7 +87,7 @@ jobs:
           from pathlib import Path
           from scripts.ci.runtime_task import runtime_result
           directory = Path('runtime-result')
-          evidence = directory / 'evidence/hosted-lsp/evidence/smoke-report.json'
+          evidence = directory / 'evidence/runtime-smoke/evidence/smoke-report.json'
           smoke = json.loads(evidence.read_text()) if evidence.is_file() else {}
           report = runtime_result(json.loads((directory / 'candidate-report.json').read_text()), smoke, os.environ['SMOKE_CONCLUSION'])
           (directory / 'runtime-candidate-report.json').write_text(json.dumps(report, indent=2) + '\n')

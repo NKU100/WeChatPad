@@ -1,4 +1,4 @@
-"""Probe official LSPosed and WeChat login UI on a disposable hosted AVD."""
+"""Verify official LSPosed and WeChat login UI on a disposable hosted AVD."""
 
 import hashlib
 import json
@@ -12,7 +12,7 @@ import time
 import xml.etree.ElementTree as ET
 import zipfile
 
-ROOT = Path('work/hosted-lsp')
+ROOT = Path('work/runtime-smoke')
 EVIDENCE = ROOT / 'evidence'
 MAGISK = '/debug_ramdisk/magisk'
 WECHAT = 'com.tencent.mm'
@@ -304,7 +304,7 @@ def main():
     finally:
         collect_logs()
         (EVIDENCE / 'smoke-report.json').write_text(json.dumps(report, indent=2) + '\n')
-        (EVIDENCE / 'summary.md').write_text('# Hosted LSPosed smoke\n\n' + json.dumps(report, indent=2)
+        (EVIDENCE / 'summary.md').write_text('# WeChat runtime smoke\n\n' + json.dumps(report, indent=2)
                                             + '\n\nNo QR scanning, account login or dual-device session was performed.\n')
         print(json.dumps(report))
     return 0 if report['status'] == 'RUNTIME_SMOKE_VERIFIED' else 1

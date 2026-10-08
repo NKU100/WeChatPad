@@ -728,7 +728,7 @@ jobs:
     permissions:
       contents: read
       actions: read
-    uses: ./.github/workflows/hosted-lsposed-smoke.yml
+    uses: ./.github/workflows/runtime-smoke.yml
     with:
       module_run_id: ${{ github.run_id }}
       module_artifact: wechatpad-adapted-module
@@ -758,7 +758,7 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@v8
         with:
-          name: hosted-lsposed-smoke
+          name: wechatpad-runtime-smoke
           path: runtime-result/evidence
       - name: Record verified profile or rejection
         id: record
@@ -772,7 +772,7 @@ jobs:
           gh auth setup-git
           python3 -m scripts.ci.runtime_task \
             --directory runtime-result \
-            --smoke runtime-result/evidence/hosted-lsp/evidence/smoke-report.json \
+            --smoke runtime-result/evidence/runtime-smoke/evidence/smoke-report.json \
             --conclusion "$SMOKE_CONCLUSION" --pr "$ADAPTATION_PR" \
             --head "$TESTED_HEAD" --issue "$ADAPTATION_ISSUE"
       - name: Upload pipeline acceptance report
