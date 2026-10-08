@@ -1,0 +1,31 @@
+import unittest
+from scripts.ci.discovery_gate import discovery_decision
+
+
+class DiscoveryGateTest(unittest.TestCase):
+    def setUp(self):
+        self.url = 'https://dldir1v6.qq.com/weixin/android/weixin8079android3200_arm64.apk'
+        self.digest = 'a' * 64
+        self.profile = {'sourceUrl': self.url, 'verificationStatus': 'runtime-verified-local',
+                        'identity': {'apkSha256': self.digest, 'versionCode': 3200}}
+
+    def test_exact_supported_apk_skips_heavy_jobs(self):
+        for status in ('runtime-verified-local', 'runtime-verified-hosted'):
+            self.profile['verificationStatus'] = status
+            self.assertEqual('SKIP_SUPPORTED_BUILD', discovery_decision([self.profile], self.url, self.digest, False))
+
+    def test_unknown_or_static_only_build_requires_analysis(self):
+        self.assertEqual('ANALYZE_CANDIDATE', discovery_decision([], self.url, self.digest, False))
+        self.profile['verificationStatus'] = 'static-verified'
+        self.assertEqual('ANALYZE_CANDIDATE', discovery_decision([self.profile], self.url, self.digest, False))
+
+    def test_digest_change_cannot_be_treated_as_unchanged(self):
+        with self.assertRaisesRegex(ValueError, 'SHA-256'):
+            discovery_decision([self.profile], self.url, 'b' * 64, False)
+
+    def test_manual_force_can_recheck_known_build(self):
+        self.assertEqual('FORCE_RECHECK', discovery_decision([self.profile], self.url, self.digest, True))
+
+    def test_duplicate_source_cannot_skip(self):
+        with self.assertRaises(ValueError):
+            discovery_decision([self.profile, self.profile], self.url, self.digest, False)

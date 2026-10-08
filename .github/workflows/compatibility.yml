@@ -1,8 +1,14 @@
 name: Check WeChat compatibility
 
 on:
+  schedule:
+    - cron: '23 2 * * *'
   workflow_dispatch:
     inputs:
+      force_recheck:
+        description: Run static regression even when the exact APK is already supported
+        type: boolean
+        default: false
       run_codex:
         description: Adapt verified unknown builds with gpt-6-luna/xhigh (one attempt)
         type: boolean
@@ -16,6 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       targets: ${{ steps.targets.outputs.matrix }}
+      skip_heavy: ${{ steps.discovery-gate.outputs.skip_heavy }}
       source_url: ${{ steps.discover.outputs.source_url }}
       expected_sha256: ${{ steps.discover.outputs.expected_sha256 }}
       cache_dir: ${{ steps.discover.outputs.cache_dir }}
@@ -27,7 +34,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Test official candidate discovery and cache validation
-        run: python3 -m unittest scripts.test_discover_latest_wechat
+        run: python3 -m unittest scripts.test_discover_latest_wechat scripts.test_discovery_gate
 
       - name: Test latest-three compatibility window selection
         run: python3 -m unittest scripts.test_select_compatibility_window
@@ -72,7 +79,48 @@ jobs:
             --github-output "$GITHUB_OUTPUT" \
             --report compatibility-report/latest-official.md
 
+      - name: Restore official candidate cache for lightweight discovery
+        uses: actions/cache@v6
+        with:
+          path: ${{ steps.discover.outputs.cache_dir }}
+          key: ${{ steps.discover.outputs.cache_key }}
+
+      - name: Revalidate discovered APK before deciding whether it changed
+        id: discovery-download
+        env:
+          SOURCE_URL: ${{ steps.discover.outputs.source_url }}
+          CACHE_DIRECTORY: ${{ steps.discover.outputs.cache_dir }}
+          EXPECTED_SHA256: ${{ steps.discover.outputs.expected_sha256 }}
+        run: |
+          python3 -m scripts.ci.fetch_latest_wechat_apk \
+            --url "$SOURCE_URL" --cache-dir "$CACHE_DIRECTORY" \
+            --expected-sha256 "$EXPECTED_SHA256" \
+            --github-output "$GITHUB_OUTPUT" --report compatibility-report/latest-official.md
+
+      - name: Decide whether expensive analysis is needed
+        id: discovery-gate
+        env:
+          SOURCE_URL: ${{ steps.discover.outputs.source_url }}
+          APK_SHA256: ${{ steps.discovery-download.outputs.apk_sha256 }}
+          FORCE_RECHECK: ${{ inputs.force_recheck || false }}
+        run: |
+          python3 -m scripts.ci.discovery_gate \
+            --targets compatibility/targets.json --source-url "$SOURCE_URL" \
+            --apk-sha256 "$APK_SHA256" --force-recheck "$FORCE_RECHECK" \
+            --github-output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY" \
+            --report compatibility-report/discovery-result.json
+
+      - name: Upload discovery decision
+        uses: actions/upload-artifact@v7
+        with:
+          name: wechatpad-discovery-result
+          path: |
+            compatibility-report/discovery-result.json
+            compatibility-report/latest-official.md
+          retention-days: 14
+
       - name: Select the latest-three regression window
+        if: steps.discovery-gate.outputs.skip_heavy != 'true'
         id: targets
         env:
           WECHAT_CANDIDATE_VERSION_CODE: ${{ steps.discover.outputs.version_code_hint }}
@@ -128,6 +176,7 @@ jobs:
 
   check:
     needs: prepare
+    if: needs.prepare.outputs.skip_heavy != 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -252,7 +301,7 @@ jobs:
   latest:
     name: Check latest official APK
     needs: [prepare, check]
-    if: always() && needs.prepare.result == 'success'
+    if: always() && needs.prepare.result == 'success' && needs.prepare.outputs.skip_heavy != 'true'
     runs-on: ubuntu-latest
     outputs:
       pipeline_status: ${{ steps.latest-compatibility.outputs.pipeline_status || steps.candidate-failure.outputs.pipeline_status }}
@@ -391,7 +440,8 @@ jobs:
     name: Adapt unknown build with Codex
     needs: [prepare, check, latest]
     if: >-
-      !cancelled() && github.ref == 'refs/heads/main' && inputs.run_codex &&
+      !cancelled() && github.ref == 'refs/heads/main' &&
+      (github.event_name == 'schedule' || inputs.run_codex) &&
       needs.latest.result == 'success' && needs.latest.outputs.adaptation_eligible == 'true'
     runs-on: ubuntu-latest
     concurrency:
@@ -422,7 +472,7 @@ jobs:
           GH_TOKEN: ${{ secrets.CODEX_AUTH_WRITE_TOKEN }}
         run: |
           set -euo pipefail
-          [[ "$GITHUB_EVENT_NAME" == 'workflow_dispatch' && "$GITHUB_REF" == 'refs/heads/main' ]] || { echo 'Managed authentication requires a manual main-branch run.'; exit 1; }
+          [[ "$GITHUB_REF" == 'refs/heads/main' && ( "$GITHUB_EVENT_NAME" == 'workflow_dispatch' || "$GITHUB_EVENT_NAME" == 'schedule' ) ]] || { echo 'Managed authentication requires a main-branch manual or scheduled run.'; exit 1; }
           [[ -n "$CODEX_AUTH_JSON" && -n "$GH_TOKEN" ]] || { echo 'Configure CODEX_AUTH_JSON and CODEX_AUTH_WRITE_TOKEN before starting Codex.'; exit 1; }
           gh api "repos/$GITHUB_REPOSITORY/actions/secrets/public-key" >/dev/null
 
