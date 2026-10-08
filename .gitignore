@@ -18,3 +18,6 @@ work/analysis/
 keystore.properties
 
 /signing/
+
+# Ramdisk inputs and generated environment artifacts
+/work/ramdisk-build/

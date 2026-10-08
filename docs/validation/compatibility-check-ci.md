@@ -65,3 +65,5 @@ runner 在模型调用前恢复凭据，之后即使模型失败也写回刷新�
 成功输出 `RUNTIME_VERIFIED`，更新候选为 `runtime-verified-hosted`，记录 PR 和 Issue；合并后才正式支持。失败输出 `RUNTIME_REJECTED`，保持草稿 PR，并上传截图、UI 树和日志。PR 被改动时拒绝使用旧运行结果晋级。
 
 `runtime-validation.yml` 可手动用已登记的 8.0.79 重放构建、静态检查、跨任务 artifact、托管冒烟和结果判定；不调用 Codex，不创建 PR 或修改正式支持清单。
+
+勾选 `rebuild_ramdisk` 可同时从官方输入重建 root ramdisk，校验与 Release 产物逐字节一致，再执行冒烟。制作步骤及本地命令见 [AVD root ramdisk 制作](../environment/ramdisk-build.md)。

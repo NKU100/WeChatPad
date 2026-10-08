@@ -2,6 +2,11 @@ name: Validate registered WeChat runtime
 
 on:
   workflow_dispatch:
+    inputs:
+      rebuild_ramdisk:
+        description: Rebuild pinned ramdisk from official inputs and verify byte-for-byte reproduction
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -62,6 +67,7 @@ jobs:
       module_run_id: ${{ github.run_id }}
       module_artifact: wechatpad-adapted-module
       candidate_artifact: wechatpad-runtime-candidate
+      rebuild_ramdisk: ${{ inputs.rebuild_ramdisk }}
 
   result:
     needs: [prepare, runtime]

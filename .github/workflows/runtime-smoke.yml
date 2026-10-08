@@ -3,6 +3,10 @@ name: Run WeChat runtime smoke
 on:
   workflow_dispatch:
     inputs:
+      rebuild_ramdisk:
+        description: Rebuild pinned ramdisk and verify reproduction
+        type: boolean
+        default: false
       module_run_id:
         description: Successful Build module APK run to reuse
         type: string
@@ -10,6 +14,10 @@ on:
 
   workflow_call:
     inputs:
+      rebuild_ramdisk:
+        description: Rebuild pinned ramdisk and verify reproduction
+        type: boolean
+        default: false
       module_run_id:
         type: string
         required: true
@@ -31,6 +39,8 @@ concurrency:
 jobs:
   smoke:
     runs-on: ubuntu-24.04
+    env:
+      REBUILD_RAMDISK: ${{ inputs.rebuild_ramdisk }}
     steps:
       - uses: actions/checkout@v7
       - name: Reserve space for Android system and userdata
@@ -124,6 +134,14 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -feature GLDirectMem,HasSharedSlotsHostMemoryAllocator -noaudio -no-boot-anim -camera-back none -camera-front none -no-snapshot
           pre-emulator-launch-script: |
             echo 'a6ee489afea9e28428ceb83d8a0cb55e4ab08cfc755ae2d1f34aff35e1e55038  '"$ANDROID_HOME/system-images/android-37.2/google_apis_ps16k/x86_64/ramdisk.img" | sha256sum --check
+            if [[ "$REBUILD_RAMDISK" == 'true' ]]; then
+              python3 scripts/environment/build_ramdisk.py \
+                --stock-ramdisk "$ANDROID_HOME/system-images/android-37.2/google_apis_ps16k/x86_64/ramdisk.img" \
+                --magisk-apk work/runtime-smoke/magisk.apk \
+                --output work/ramdisk-build/result
+              cmp work/ramdisk-build/result/ramdisk37-patched.img work/runtime-smoke/ramdisk37-patched.img
+              cp work/ramdisk-build/result/manifest.json work/runtime-smoke/evidence/ramdisk-reproduction.json
+            fi
             cp work/runtime-smoke/ramdisk37-patched.img "$ANDROID_HOME/system-images/android-37.2/google_apis_ps16k/x86_64/ramdisk.img"
           script: |
             bash scripts/ci/verify_avd_root.sh
