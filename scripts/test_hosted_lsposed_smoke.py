@@ -2,6 +2,8 @@ import importlib.util
 from pathlib import Path
 import unittest
 from unittest.mock import patch
+import subprocess
+import tempfile
 
 spec = importlib.util.spec_from_file_location('smoke', Path(__file__).parent / 'ci/hosted_lsposed_smoke.py')
 smoke = importlib.util.module_from_spec(spec)
@@ -13,6 +15,12 @@ class UiEvidenceTest(unittest.TestCase):
         with patch.object(smoke, "su") as root:
             smoke.enable_page_size_backcompat()
         self.assertEqual(root.call_args_list[0].args, ("setprop bionic.linker.16kb.app_compat.enabled true; setprop pm.16kb.app_compat.disabled false",))
+
+    def test_snapshot_uses_native_hierarchy_reader(self):
+        result = subprocess.CompletedProcess([], 0, b"<hierarchy />", b"")
+        with tempfile.TemporaryDirectory() as folder, patch.object(smoke, "EVIDENCE", Path(folder)), patch.object(smoke, "adb", return_value=result) as device:
+            smoke.snapshot("probe")
+        self.assertTrue(any("UiHierarchy" in call.args for call in device.call_args_list))
 
     def test_launcher_is_not_wechat(self):
         self.assertFalse(smoke.has_wechat_ui('<hierarchy><node package="com.google.android.apps.nexuslauncher" /></hierarchy>'))

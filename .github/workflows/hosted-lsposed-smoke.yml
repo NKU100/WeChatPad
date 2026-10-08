@@ -87,6 +87,9 @@ jobs:
             cp work/hosted-lsp/ramdisk37-patched.img "$ANDROID_HOME/system-images/android-37.2/google_apis_ps16k/x86_64/ramdisk.img"
           script: |
             bash scripts/ci/hosted_root_probe.sh
+            mkdir -p work/hosted-lsp/ui-classes
+            javac --release 17 -cp "$ANDROID_HOME/platforms/android-37.2/android.jar" -d work/hosted-lsp/ui-classes scripts/ci/UiHierarchy.java
+            "$ANDROID_HOME/build-tools/37.0.0/d8" --min-api 37 --lib "$ANDROID_HOME/platforms/android-37.2/android.jar" --output work/hosted-lsp/ui-hierarchy.jar work/hosted-lsp/ui-classes/UiHierarchy.class
             python3 scripts/ci/hosted_lsposed_smoke.py
       - name: Upload runtime evidence
         if: always()

@@ -72,7 +72,10 @@ def unique_node(xml, predicate):
 
 def snapshot(label):
     adb('shell', 'rm', '-f', '/sdcard/hosted-smoke.xml')
-    adb('shell', 'uiautomator', 'dump', '/sdcard/hosted-smoke.xml', timeout=25, check=False)
+    dump = adb('shell', 'env', 'CLASSPATH=/data/local/tmp/ui-hierarchy.jar',
+               'app_process', '/system/bin', 'UiHierarchy', '/sdcard/hosted-smoke.xml',
+               timeout=25, check=False)
+    save(label + '-dump.txt', dump)
     ui = adb('shell', 'cat', '/sdcard/hosted-smoke.xml', check=False)
     save(label + '.xml', ui)
     screen = adb('exec-out', 'screencap', '-p', check=False)
@@ -184,6 +187,8 @@ def main():
     EVIDENCE.mkdir(parents=True, exist_ok=True)
     report = {'status': 'FAILED', 'stage': stage}
     try:
+        stage = 'AUTOMATION_SETUP'
+        adb('push', str(ROOT / 'ui-hierarchy.jar'), '/data/local/tmp/ui-hierarchy.jar')
         stage = 'BASELINE'
         enable_page_size_backcompat()
         save('page-size-compat.txt', adb('shell', 'getprop'))
