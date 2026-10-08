@@ -12,9 +12,9 @@ on:
       goal_token_budget:
         description: Maximum token budget for one Codex adaptation goal
         type: string
-        default: '150000'
+        default: '200000'
       retry_adaptation:
-        description: Retry a failed or cancelled adaptation for the latest exact APK
+        description: Start a new adaptation attempt even when an earlier draft PR exists
         type: boolean
         default: false
       run_codex:
@@ -639,7 +639,7 @@ jobs:
         if: steps.claim.outputs.claimed == 'true'
         env:
           CODEX_HOME: ${{ runner.temp }}/wechatpad-codex-auth
-          GOAL_TOKEN_BUDGET: ${{ inputs.goal_token_budget || '150000' }}
+          GOAL_TOKEN_BUDGET: ${{ inputs.goal_token_budget || '200000' }}
           CODEX_TRACE_RECIPIENT: ${{ vars.CODEX_TRACE_RECIPIENT }}
         run: |
           cd "$CONTROLLER_ROOT"

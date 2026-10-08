@@ -8,7 +8,7 @@ import subprocess
 from collections import deque
 from pathlib import Path
 
-DEFAULT_TOKEN_BUDGET = 150_000
+DEFAULT_TOKEN_BUDGET = 200_000
 
 
 def redact(text, secrets):
@@ -59,9 +59,13 @@ class AppServer:
         self.process = None
         try:
             self.stderr = (directory / 'app-server.stderr.log').open('w')
-            self.process = subprocess.Popen(
+            from scripts.ci.codex_sandbox import model_command
+            command = model_command(directory, env,
                 ['codex', 'app-server', '--listen', 'stdio://', '-c', 'features.goals=true',
-                 '-c', 'features.multi_agent=false', '-c', 'features.multi_agent_v2=false'],
+                 '-c', 'features.multi_agent=false', '-c', 'features.multi_agent_v2=false',
+                 '-c', 'features.apps=false', '-c', 'features.plugins=false',
+                 '-c', 'features.shell_snapshot=false', '-c', 'web_search="disabled"'])
+            self.process = subprocess.Popen(command,
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.stderr,
                 text=True, env=env, start_new_session=True)
             self.request('initialize', {'clientInfo': {'name': 'wechatpad_ci', 'version': '1'},
@@ -167,8 +171,15 @@ def run_goal(client, directory, prompt, token_budget):
     if type(token_budget) is not int or token_budget <= 0:
         raise ValueError('Goal token budget must be a positive integer')
     workspace = directory / 'checkout'
+    hidden_repository = str(Path(os.environ.get('GITHUB_WORKSPACE', '/unavailable-repository')) / '.git/HEAD')
+    probe = ("from pathlib import Path; import tempfile; "
+             "assert Path('work/apks/candidate.apk').is_file(); "
+             "assert Path('work/analysis/candidate-report.json').is_file(); "
+             "assert not Path('../state.json').exists(); "
+             f"assert not Path({hidden_repository!r}).exists(); "
+             "f=tempfile.TemporaryFile(dir='.'); f.write(b'probe'); f.close(); print('sandbox ready')")
     preflight = client.request('command/exec', {
-        'command': ['python3', '-c', "from pathlib import Path; import tempfile; assert Path('work/apks/candidate.apk').is_file(); assert Path('work/analysis/candidate-report.json').is_file(); f=tempfile.TemporaryFile(dir='.'); f.write(b'probe'); f.close(); print('sandbox ready')"],
+        'command': ['python3', '-c', probe],
         'cwd': str(workspace), 'timeoutMs': 10000,
         'sandboxPolicy': {'type': 'workspaceWrite', 'writableRoots': [str(workspace)], 'networkAccess': False}})
     if preflight.get('exitCode') != 0:

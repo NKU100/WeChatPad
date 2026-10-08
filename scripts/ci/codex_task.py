@@ -29,9 +29,11 @@ def existing_attempt(issues, key):
 
 def retry_allowed(issue, run):
     body = issue.get("body") or ""
-    if 'Status: `NEEDS_HOOK_REVIEW`' in body:
+    match = re.search(r"^Status: `([A-Z_]+)`$", body, re.MULTILINE)
+    status = match[1] if match else None
+    if status in {"NEEDS_HOOK_REVIEW", "RUNTIME_REJECTED", "WAITING_RUNTIME"}:
         return True
-    return ('Status: `ADAPTATION_RUNNING`' in body and run is not None
+    return (status == "ADAPTATION_RUNNING" and run is not None
             and run.get("status") == "completed"
             and run.get("conclusion") in {"failure", "cancelled", "timed_out", "skipped", "startup_failure"})
 
@@ -79,10 +81,11 @@ def claim(repo, report, targets, directory, run_url, retry=False):
         run_match = re.search(r"^Run: https://github\.com/" + re.escape(repo) + r"/actions/runs/(\d+)$", body_text, re.MULTILINE)
         if retry and run_match and 'Status: `ADAPTATION_RUNNING`' in body_text:
             run = json.loads(gh("api", f"repos/{repo}/actions/runs/{run_match[1]}"))
-        if retry and retry_allowed(previous, run) and "Adaptation PR:" not in body_text:
+        if retry and retry_allowed(previous, run):
             if previous.get("state") == "closed":
                 gh("issue", "reopen", str(previous["number"]), "--repo", repo)
-            write_issue(repo, previous["number"], issue_body(report, "ADAPTATION_RUNNING", run_url), directory)
+            write_issue(repo, previous["number"], issue_body(report, "ADAPTATION_RUNNING", run_url)
+                        + ("\nPrevious attempt:\n" + body_text + "\n"), directory)
             append_github_output(Path(os.environ["GITHUB_OUTPUT"]), {"claimed": "true", "issue": str(previous["number"])})
             return
         append_github_output(Path(os.environ["GITHUB_OUTPUT"]), {"claimed": "false", "issue": str(previous["number"])})
@@ -102,7 +105,10 @@ def publish(repo, directory, issue, run_url):
     if report["status"] != "STATIC_VERIFIED_PENDING_RUNTIME":
         raise ValueError("Draft PR requires successful candidate and regression checks")
     key = candidate_key(report)
-    branch = "adapt/wechat-" + key
+    run_id = re.fullmatch(r"https://github\.com/" + re.escape(repo) + r"/actions/runs/(\d+)", run_url)
+    if run_id is None:
+        raise ValueError("Publication requires a valid workflow run URL")
+    branch = "adapt/wechat-" + key + "-run-" + run_id[1]
     checkout = Path(os.environ["GITHUB_WORKSPACE"])
     head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=checkout).decode().strip()
     current_main = gh("api", f"repos/{repo}/git/ref/heads/main", "--jq", ".object.sha")

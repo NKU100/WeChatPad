@@ -70,9 +70,9 @@ class ResolutionCacheTest {
             block(
                 ResolutionCache(file.toFile()),
                 ResolutionCacheKey(
-                    apkSha256 = "5feb100337981467fd257c3ad66bb171f54a69d2579b2ecc70d5a628db8e7282",
+                    apkSha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                     signerSha256 = "0fe4ff85c215918396dadc7cd8ce6963339af33d37751a56e54c7206b63a3c7c",
-                    versionCode = 3200,
+                    versionCode = 4000,
                     resolverVersion = COMPATIBILITY_RESOLVER_VERSION,
                     featureRulesVersion = 1,
                 ),

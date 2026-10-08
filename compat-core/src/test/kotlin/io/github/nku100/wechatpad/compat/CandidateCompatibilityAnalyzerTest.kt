@@ -18,7 +18,7 @@ class CandidateCompatibilityAnalyzerTest {
         val report = analyze(baseline = forwardSafeSameShapeBaseline())
 
         assertEquals(CandidatePipelineStatus.STATIC_VERIFIED_PENDING_RUNTIME, report.status)
-        assertEquals(listOf("8.0.69", "8.0.78", "8.0.79"), report.checkedVersions)
+        assertEquals(listOf("8.0.69", "8.0.78", "8.0.90"), report.checkedVersions)
         assertEquals(CandidateHookStatus.UNIQUE_MATCH, report.hooks.first { it.hookId == "tablet" }.status)
         assertEquals(CandidateHookStatus.UNIQUE_MATCH, report.hooks.first { it.hookId == "login" }.status)
         assertEquals(TABLET_79, report.suggestedProfile?.hooks?.first { it.id == "tablet" }?.expectedDescriptor)
@@ -72,7 +72,7 @@ class CandidateCompatibilityAnalyzerTest {
 
     @Test
     fun reportsAmbiguousAnchorMatchesSeparately() {
-        val secondMatch = TABLET_FACT_78.copy(descriptor = "Lcom/tencent/mm/ui/other;->tabletAgain(Lou5/w0;)Z")
+        val secondMatch = TABLET_FACT_78.copy(descriptor = "Lcom/tencent/mm/ui/other;->tabletAgain(Lfixture/OldEnvironment;)Z")
 
         val report = analyze(facts = listOf(TABLET_FACT_78, secondMatch, LOGIN_FACT))
 
@@ -95,7 +95,7 @@ class CandidateCompatibilityAnalyzerTest {
     fun rejectsABaselineOutsideTheSelectedRegressionWindow() {
         val report = analyze(
             baseline = forwardSafeSameShapeBaseline(),
-            checkedVersions = listOf("8.0.69", "8.0.79"),
+            checkedVersions = listOf("8.0.69", "8.0.90"),
         )
 
         assertEquals(CandidatePipelineStatus.BASELINE_INVALID, report.status)
@@ -117,7 +117,7 @@ class CandidateCompatibilityAnalyzerTest {
 
         assertEquals(CandidatePipelineStatus.STATIC_REGRESSION_FAILED, report.status)
         assertNull(report.suggestedProfile)
-        assertEquals(listOf("8.0.69", "8.0.78", "8.0.79"), report.checkedVersions)
+        assertEquals(listOf("8.0.69", "8.0.78", "8.0.90"), report.checkedVersions)
     }
 
     @Test
@@ -171,7 +171,7 @@ class CandidateCompatibilityAnalyzerTest {
             identity = CANDIDATE_IDENTITY,
             target = registered79(),
             facts = candidateFacts(),
-            checkedVersions = listOf("8.0.69", "8.0.78", "8.0.79"),
+            checkedVersions = listOf("8.0.69", "8.0.78", "8.0.90"),
             regressionPassed = true,
             profileMergedToMain = true,
         )
@@ -200,7 +200,7 @@ class CandidateCompatibilityAnalyzerTest {
             identity = CANDIDATE_IDENTITY,
             target = registered79(),
             facts = candidateFacts(),
-            checkedVersions = listOf("8.0.69", "8.0.78", "8.0.79"),
+            checkedVersions = listOf("8.0.69", "8.0.78", "8.0.90"),
             regressionPassed = true,
             profileMergedToMain = false,
         )
@@ -213,7 +213,7 @@ class CandidateCompatibilityAnalyzerTest {
         baseline: CompatibilityTarget = baseline78(),
         facts: List<DexMethodFact> = candidateFacts(),
         regressionPassed: Boolean = true,
-        checkedVersions: List<String> = listOf("8.0.69", "8.0.78", "8.0.79"),
+        checkedVersions: List<String> = listOf("8.0.69", "8.0.78", "8.0.90"),
     ) = CandidateCompatibilityAnalyzer.analyze(
         identity = identity,
         baseline = baseline,
@@ -249,8 +249,8 @@ class CandidateCompatibilityAnalyzerTest {
     private fun forwardSafeSameShapeBaseline() = baseline78().copy(
         hooks = listOf(
             TABLET_RULE_78.copy(
-                parameterDescriptors = listOf("Lpv5/w0;"),
-                expectedDescriptor = "Lcom/tencent/mm/ui/gk;->C(Lpv5/w0;)Z",
+                parameterDescriptors = listOf("Lfixture/NewEnvironment;"),
+                expectedDescriptor = "Lfixture/OldTablet;->C(Lfixture/NewEnvironment;)Z",
             ),
             LOGIN_RULE_78,
         ),
@@ -260,10 +260,10 @@ class CandidateCompatibilityAnalyzerTest {
         identity = CANDIDATE_IDENTITY,
         hooks = listOf(
             TABLET_RULE_78.copy(
-                parameterDescriptors = listOf("Lpv5/w0;"),
+                parameterDescriptors = listOf("Lfixture/NewEnvironment;"),
                 expectedDescriptor = TABLET_79,
             ),
-            LOGIN_RULE_78.copy(expectedDescriptor = "Lfb1/h0;->a(Landroid/view/View;Landroidx/lifecycle/y;)V"),
+            LOGIN_RULE_78.copy(expectedDescriptor = "Lfixture/NewLogin;->a(Landroid/view/View;Landroidx/lifecycle/y;)V"),
         ),
         verificationStatus = VerificationStatus.RUNTIME_VERIFIED_LOCAL,
     )
@@ -272,23 +272,23 @@ class CandidateCompatibilityAnalyzerTest {
 
     private companion object {
         const val SIGNER_SHA256 = "0fe4ff85c215918396dadc7cd8ce6963339af33d37751a56e54c7206b63a3c7c"
-        const val TABLET_ANCHOR_78 = "inTabletEnv, no tablet condition matched, return false"
-        const val TABLET_79 = "Lcom/tencent/mm/ui/ok;->C(Lpv5/w0;)Z"
+        const val TABLET_ANCHOR_78 = "synthetic-tablet-anchor"
+        const val TABLET_79 = "Lfixture/NewTablet;->C(Lfixture/NewEnvironment;)Z"
 
         val CANDIDATE_IDENTITY = BuildIdentity(
             packageName = "com.tencent.mm",
-            versionName = "8.0.79",
-            versionCode = 3200,
+            versionName = "8.0.90",
+            versionCode = 4000,
             abi = "arm64-v8a",
-            apkSha256 = "5feb100337981467fd257c3ad66bb171f54a69d2579b2ecc70d5a628db8e7282",
+            apkSha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             signerSha256 = SIGNER_SHA256,
         )
         val TABLET_RULE_78 = HookRule(
             "tablet",
             TABLET_ANCHOR_78,
-            listOf("Lou5/w0;"),
+            listOf("Lfixture/OldEnvironment;"),
             "Z",
-            "Lcom/tencent/mm/ui/gk;->C(Lou5/w0;)Z",
+            "Lfixture/OldTablet;->C(Lfixture/OldEnvironment;)Z",
             safeForForwardInference = true,
         )
         val LOGIN_RULE_78 = HookRule(
@@ -296,23 +296,23 @@ class CandidateCompatibilityAnalyzerTest {
             "loginAsOtherDeviceBtn",
             listOf("Landroid/view/View;", "Landroidx/lifecycle/y;"),
             "V",
-            "Lva1/h0;->a(Landroid/view/View;Landroidx/lifecycle/y;)V",
+            "Lfixture/OldLogin;->a(Landroid/view/View;Landroidx/lifecycle/y;)V",
             safeForForwardInference = true,
         )
         val TABLET_FACT = DexMethodFact(
             TABLET_79,
-            listOf("Lpv5/w0;"),
+            listOf("Lfixture/NewEnvironment;"),
             "Z",
             setOf(TABLET_ANCHOR_78),
         )
         val TABLET_FACT_78 = DexMethodFact(
-            "Lcom/tencent/mm/ui/gk;->C(Lou5/w0;)Z",
-            listOf("Lou5/w0;"),
+            "Lfixture/OldTablet;->C(Lfixture/OldEnvironment;)Z",
+            listOf("Lfixture/OldEnvironment;"),
             "Z",
             setOf(TABLET_ANCHOR_78),
         )
         val LOGIN_FACT = DexMethodFact(
-            "Lfb1/h0;->a(Landroid/view/View;Landroidx/lifecycle/y;)V",
+            "Lfixture/NewLogin;->a(Landroid/view/View;Landroidx/lifecycle/y;)V",
             listOf("Landroid/view/View;", "Landroidx/lifecycle/y;"),
             "V",
             setOf("loginAsOtherDeviceBtn"),

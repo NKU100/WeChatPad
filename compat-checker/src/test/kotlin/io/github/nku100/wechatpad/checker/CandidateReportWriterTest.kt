@@ -18,15 +18,15 @@ class CandidateReportWriterTest {
         val report = CandidateCompatibilityReport(
             identity = BuildIdentity(
                 packageName = "com.tencent.mm",
-                versionName = "8.0.79",
-                versionCode = 3200,
+                versionName = "8.0.90",
+                versionCode = 4000,
                 abi = "arm64-v8a",
                 apkSha256 = "a".repeat(64),
                 signerSha256 = "b".repeat(64),
             ),
-            sourceUrl = "https://dldir1v6.qq.com/weixin/android/weixin8079android3200_arm64.apk",
+            sourceUrl = "https://dldir1v6.qq.com/weixin/android/weixin8079android4000_arm64.apk",
             baselineVersion = "8.0.69",
-            checkedVersions = listOf("8.0.69", "8.0.79"),
+            checkedVersions = listOf("8.0.69", "8.0.90"),
             status = CandidatePipelineStatus.NEEDS_HOOK_REVIEW,
             hooks = listOf(
                 CandidateHookDiagnostic(

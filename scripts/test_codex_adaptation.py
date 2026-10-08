@@ -18,6 +18,46 @@ class CodexAdaptationTest(unittest.TestCase):
         self.profile = copy.deepcopy(self.targets[-1])
         self.profile.update(identity=self.identity, sourceUrl=self.report['sourceUrl'], verificationStatus='static-verified')
 
+    def test_preparation_excludes_history_reports_and_inferred_answers(self):
+        from scripts.ci.codex_adaptation import prepare, git
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repository = root / 'repository'
+            repository.mkdir()
+            subprocess.run(['git', 'init', '-q', str(repository)], check=True)
+            for path in ['.gitignore', 'gradlew', 'gradlew.bat', 'gradle.properties',
+                         'build.gradle.kts', 'settings.gradle.kts', 'gradle/fixture',
+                         'app/src/test/fixture', 'compat-core/fixture', 'compat-checker/fixture']:
+                file = repository / path
+                file.parent.mkdir(parents=True, exist_ok=True)
+                file.write_text('synthetic')
+            targets = repository / 'compatibility/targets.json'
+            targets.parent.mkdir()
+            targets.write_text(json.dumps(self.targets))
+            (repository / 'old-answer.md').write_text('secret answer')
+            subprocess.run(['git', 'add', '.'], cwd=repository, check=True)
+            subprocess.run(['git', '-c', 'user.name=Test', '-c', 'user.email=test@localhost',
+                            'commit', '-qm', 'Old answer'], cwd=repository, check=True)
+            apk = root / 'candidate.apk'
+            apk.write_bytes(b'candidate')
+            report = dict(self.report, identity=dict(self.identity, apkSha256=sha256(apk)),
+                          hooks=['secret answer'], suggestedProfile={'answer': True})
+            report_path = root / 'report.json'
+            report_path.write_text(json.dumps(report))
+            task = root / 'task'
+            with patch('scripts.ci.codex_adaptation.select_regression_targets', return_value=[]):
+                prepare(repository, report_path, apk, task)
+            checkout = task / 'checkout'
+            self.assertFalse((checkout / 'old-answer.md').exists())
+            self.assertEqual('1', git(checkout, 'rev-list', '--count', 'HEAD'))
+            self.assertEqual('', git(checkout, 'remote'))
+            supplied = json.loads((checkout / 'work/analysis/candidate-report.json').read_text())
+            self.assertEqual({'identity', 'sourceUrl', 'status'}, set(supplied))
+            state = json.loads((task / 'state.json').read_text())
+            self.assertEqual(git(repository, 'rev-parse', 'HEAD'), state['base'])
+            self.assertEqual(git(checkout, 'rev-parse', 'HEAD'), state['agent_base'])
+            self.assertNotEqual(state['base'], state['agent_base'])
+
     def test_unknown_verified_candidate_can_run_even_when_static_inference_passed(self):
         self.assertTrue(eligible_candidate(self.report, self.targets))
         self.report['status'] = 'STATIC_VERIFIED_PENDING_RUNTIME'

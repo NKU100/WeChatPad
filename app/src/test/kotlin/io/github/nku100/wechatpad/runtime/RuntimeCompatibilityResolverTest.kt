@@ -163,15 +163,15 @@ class RuntimeCompatibilityResolverTest {
     )
 
     private fun facts() = listOf(
-        DexMethodFact(TABLET_METHOD, listOf("Lpv5/w0;"), "Z", setOf(TABLET_ANCHOR)),
+        DexMethodFact(TABLET_METHOD, listOf("Lfixture/NewEnvironment;"), "Z", setOf(TABLET_ANCHOR)),
         DexMethodFact(LOGIN_METHOD, listOf("Landroid/view/View;", "Landroidx/lifecycle/y;"), "V", setOf(LOGIN_ANCHOR)),
     )
 
     private fun target() = CompatibilityTarget(
         identity = BuildIdentity(
             packageName = "com.tencent.mm",
-            versionName = "8.0.79",
-            versionCode = 3200,
+            versionName = "8.0.90",
+            versionCode = 4000,
             abi = "arm64-v8a",
             apkSha256 = APK_SHA256,
             signerSha256 = SIGNER_SHA256,
@@ -179,7 +179,7 @@ class RuntimeCompatibilityResolverTest {
         featureRulesVersion = 1,
         verificationStatus = VerificationStatus.STATIC_VERIFIED,
         hooks = listOf(
-            HookRule("tablet", TABLET_ANCHOR, listOf("Lpv5/w0;"), "Z", TABLET_METHOD),
+            HookRule("tablet", TABLET_ANCHOR, listOf("Lfixture/NewEnvironment;"), "Z", TABLET_METHOD),
             HookRule("login", LOGIN_ANCHOR, listOf("Landroid/view/View;", "Landroidx/lifecycle/y;"), "V", LOGIN_METHOD),
         ),
     )
@@ -201,17 +201,17 @@ class RuntimeCompatibilityResolverTest {
         fun cacheKey() = ResolutionCacheKey(
             apkSha256 = APK_SHA256,
             signerSha256 = SIGNER_SHA256,
-            versionCode = 3200,
+            versionCode = 4000,
             resolverVersion = COMPATIBILITY_RESOLVER_VERSION,
             featureRulesVersion = 1,
         )
 
-        const val APK_SHA256 = "5feb100337981467fd257c3ad66bb171f54a69d2579b2ecc70d5a628db8e7282"
+        const val APK_SHA256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         const val UNKNOWN_SHA256 = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
         const val SIGNER_SHA256 = "0fe4ff85c215918396dadc7cd8ce6963339af33d37751a56e54c7206b63a3c7c"
         const val TABLET_ANCHOR = "tablet-anchor"
         const val LOGIN_ANCHOR = "login-anchor"
-        const val TABLET_METHOD = "Lcom/tencent/mm/ui/ok;->C(Lpv5/w0;)Z"
-        const val LOGIN_METHOD = "Lfb1/h0;->a(Landroid/view/View;Landroidx/lifecycle/y;)V"
+        const val TABLET_METHOD = "Lfixture/NewTablet;->C(Lfixture/NewEnvironment;)Z"
+        const val LOGIN_METHOD = "Lfixture/NewLogin;->a(Landroid/view/View;Landroidx/lifecycle/y;)V"
     }
 }

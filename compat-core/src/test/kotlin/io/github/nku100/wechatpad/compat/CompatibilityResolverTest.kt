@@ -244,22 +244,22 @@ class CompatibilityResolverTest {
     }
 
     private companion object {
-        const val TABLET_METHOD = "Lcom/tencent/mm/ui/ok;->C(Lpv5/w0;)Z"
-        const val LOGIN_METHOD = "Lfb1/h0;->a(Landroid/view/View;Landroidx/lifecycle/y;)V"
+        const val TABLET_METHOD = "Lfixture/NewTablet;->C(Lfixture/NewEnvironment;)Z"
+        const val LOGIN_METHOD = "Lfixture/NewLogin;->a(Landroid/view/View;Landroidx/lifecycle/y;)V"
         const val WRONG_SHA256 = "0000000000000000000000000000000000000000000000000000000000000000"
 
         val REGISTERED_IDENTITY = BuildIdentity(
             packageName = "com.tencent.mm",
-            versionName = "8.0.79",
-            versionCode = 3200,
+            versionName = "8.0.90",
+            versionCode = 4000,
             abi = "arm64-v8a",
-            apkSha256 = "5feb100337981467fd257c3ad66bb171f54a69d2579b2ecc70d5a628db8e7282",
+            apkSha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             signerSha256 = "0fe4ff85c215918396dadc7cd8ce6963339af33d37751a56e54c7206b63a3c7c",
         )
         val TABLET_RULE = HookRule(
             id = "tablet",
-            stringAnchor = "inTabletEnv, no tablet condition matched, return false",
-            parameterDescriptors = listOf("Lpv5/w0;"),
+            stringAnchor = "synthetic-tablet-anchor",
+            parameterDescriptors = listOf("Lfixture/NewEnvironment;"),
             returnDescriptor = "Z",
             expectedDescriptor = TABLET_METHOD,
         )
@@ -272,9 +272,9 @@ class CompatibilityResolverTest {
         )
         val TABLET_FACT = DexMethodFact(
             descriptor = TABLET_METHOD,
-            parameterDescriptors = listOf("Lpv5/w0;"),
+            parameterDescriptors = listOf("Lfixture/NewEnvironment;"),
             returnDescriptor = "Z",
-            strings = setOf("inTabletEnv, no tablet condition matched, return false"),
+            strings = setOf("synthetic-tablet-anchor"),
         )
         val LOGIN_FACT = DexMethodFact(
             descriptor = LOGIN_METHOD,

@@ -6,6 +6,8 @@ import json
 import os
 import re
 import signal
+import tarfile
+import tempfile
 import subprocess
 from pathlib import Path
 
@@ -116,7 +118,26 @@ def prepare(repository, report_path, candidate_apk, directory):
     directory.mkdir(parents=True, exist_ok=True)
     worktree = directory / "checkout"
     base = git(repository, "rev-parse", "HEAD")
-    subprocess.run(["git", "worktree", "add", "--detach", str(worktree), base], cwd=repository, check=True)
+    # Export only build inputs; the model must not inherit repository history or reports.
+    worktree.mkdir()
+    paths = [".gitignore", "gradlew", "gradlew.bat", "gradle", "gradle.properties",
+             "build.gradle.kts", "settings.gradle.kts", "app", "compat-core",
+             "compat-checker", "compatibility/targets.json"]
+    with tempfile.TemporaryFile() as archive:
+        subprocess.run(["git", "archive", base, "--", *paths], cwd=repository, stdout=archive, check=True)
+        archive.seek(0)
+        with tarfile.open(fileobj=archive) as source:
+            members = source.getmembers()
+            if any(not (member.isfile() or member.isdir())
+                   or member.name.startswith("/") or ".." in Path(member.name).parts
+                   for member in members):
+                raise ValueError("Build input archive must contain only regular files and directories")
+            source.extractall(worktree, members=members)
+    subprocess.run(["git", "init", "--quiet", str(worktree)], check=True)
+    subprocess.run(["git", "add", "."], cwd=worktree, check=True)
+    subprocess.run(["git", "-c", "user.name=CI", "-c", "user.email=ci@localhost",
+                    "commit", "--quiet", "-m", "Build inputs"], cwd=worktree, check=True)
+    agent_base = git(worktree, "rev-parse", "HEAD")
     apk_dir = worktree / "work/apks"
     apk_dir.mkdir(parents=True)
     # Hard links avoid duplicating large, already verified APK files on the runner.
@@ -131,16 +152,18 @@ def prepare(repository, report_path, candidate_apk, directory):
         apks.append((identity["versionName"], str(destination.relative_to(worktree))))
     analysis = worktree / "work/analysis"
     analysis.mkdir(parents=True)
-    (analysis / "candidate-report.json").write_text(json.dumps(report, indent=2))
+    (analysis / "candidate-report.json").write_text(json.dumps({
+        "identity": report["identity"], "sourceUrl": report["sourceUrl"],
+        "status": "UNKNOWN_BUILD"}, indent=2))
     existing_tests = {str(path.relative_to(worktree)): sha256(path)
                       for module in ["app", "compat-core"]
                       for path in (worktree / module / "src/test").rglob("*") if path.is_file()}
-    state = {"worktree": str(worktree), "base": base, "before": before, "report": report,
+    state = {"worktree": str(worktree), "base": base, "agent_base": agent_base, "before": before, "report": report,
              "apks": apks, "existing_tests": existing_tests}
     (directory / "state.json").write_text(json.dumps(state, indent=2))
 
 
-def run_model(directory, prompt_path, token_budget=150_000):
+def run_model(directory, prompt_path, token_budget=200_000):
     from scripts.ci.codex_goal import run_model_goal
     run_model_goal(directory, prompt_path, token_budget)
 
@@ -148,9 +171,9 @@ def run_model(directory, prompt_path, token_budget=150_000):
 def validate(directory):
     state = json.loads((directory / "state.json").read_text())
     worktree = Path(state["worktree"])
-    if git(worktree, "rev-parse", "HEAD") != state["base"]:
+    if git(worktree, "rev-parse", "HEAD") != state.get("agent_base", state["base"]):
         raise ValueError("Agent must leave adaptation changes uncommitted")
-    tracked = git(worktree, "diff", "--name-only", state["base"]).splitlines()
+    tracked = git(worktree, "diff", "--name-only", state.get("agent_base", state["base"])).splitlines()
     new_files = git(worktree, "ls-files", "--others", "--exclude-standard").splitlines()
     validate_paths(tracked + new_files)
     if any((worktree / path).is_symlink() for path in tracked + new_files):
@@ -167,9 +190,9 @@ def validate(directory):
                 worktree, dict(os.environ), directory / "build.log", timeout=600)
     for path in new_files:
         subprocess.run(["git", "add", "--", path], cwd=worktree, check=True)
-    subprocess.run(["git", "diff", "--check", state["base"]], cwd=worktree, check=True)
+    subprocess.run(["git", "diff", "--check", state.get("agent_base", state["base"])], cwd=worktree, check=True)
     with (directory / "adaptation.patch").open("w") as patch:
-        subprocess.run(["git", "diff", "--binary", state["base"]], cwd=worktree, stdout=patch, check=True)
+        subprocess.run(["git", "diff", "--binary", state.get("agent_base", state["base"])], cwd=worktree, stdout=patch, check=True)
     report = dict(candidate, status="STATIC_VERIFIED_PENDING_RUNTIME", blockers=[],
                   checkedVersions=[version for version, _ in state["apks"]],
                   suggestedProfile=next(p for p in after if p["identity"] == candidate["identity"]))
@@ -189,7 +212,7 @@ def main():
     parser.add_argument("--apk", type=Path)
     parser.add_argument("--directory", type=Path)
     parser.add_argument("--prompt", type=Path)
-    parser.add_argument("--goal-token-budget", type=int, default=150_000)
+    parser.add_argument("--goal-token-budget", type=int, default=200_000)
     args = parser.parse_args()
     if args.stage == "eligibility":
         report = json.loads(args.report.read_text())

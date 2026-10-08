@@ -19,8 +19,8 @@ class ApkIdentityInspectorTest {
             when {
                 command.getOrNull(1) == "manifest" -> when (command.getOrNull(2)) {
                     "application-id" -> "com.tencent.mm\n"
-                    "version-name" -> "8.0.79\n"
-                    "version-code" -> "3200\n"
+                    "version-name" -> "8.0.90\n"
+                    "version-code" -> "4000\n"
                     else -> error("Unexpected manifest query: $command")
                 }
 
@@ -32,8 +32,8 @@ class ApkIdentityInspectorTest {
         val identity = inspector.inspect(apk)
 
         assertEquals("com.tencent.mm", identity.packageName)
-        assertEquals("8.0.79", identity.versionName)
-        assertEquals(3200L, identity.versionCode)
+        assertEquals("8.0.90", identity.versionName)
+        assertEquals(4000L, identity.versionCode)
         assertEquals("arm64-v8a", identity.abi)
         assertEquals(SIGNER_SHA256, identity.signerSha256)
         assertEquals(sha256(apk), identity.apkSha256)
