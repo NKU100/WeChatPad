@@ -33,7 +33,7 @@ def eligible_candidate(report, targets):
     candidate_key(report)
     identity = report["identity"]
     validate_official_apk_url(report["sourceUrl"])
-    trusted = [p for p in targets if p.get("verificationStatus") == "runtime-verified-local"]
+    trusted = [p for p in targets if p.get("verificationStatus") in {"runtime-verified-local", "runtime-verified-hosted"}]
     if not trusted:
         raise ValueError("No runtime-verified baseline is available")
     baseline = max(trusted, key=lambda p: p["identity"]["versionCode"])["identity"]
@@ -57,7 +57,7 @@ def validate_profiles(before, after, report):
     if candidate is None or candidate["identity"] != report["identity"]:
         raise ValueError("Candidate profile identity must match the verified APK")
     if candidate.get("verificationStatus") != "static-verified":
-        raise ValueError("Candidate must remain static-verified until local runtime approval")
+        raise ValueError("Candidate must remain static-verified until runtime verification")
     if candidate.get("sourceUrl") != report["sourceUrl"]:
         raise ValueError("Candidate source must match the verified report")
     hooks = candidate.get("hooks", [])

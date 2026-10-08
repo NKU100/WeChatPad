@@ -1,5 +1,6 @@
 """Probe official LSPosed and WeChat login UI on a disposable hosted AVD."""
 
+import hashlib
 import json
 import csv
 import io
@@ -224,10 +225,20 @@ def collect_logs():
     return (logcat.stdout + framework.stdout).decode(errors='replace')
 
 
+def apk_digest(path):
+    digest = hashlib.sha256()
+    with path.open('rb') as apk:
+        for chunk in iter(lambda: apk.read(1024 * 1024), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def main():
     global stage
     EVIDENCE.mkdir(parents=True, exist_ok=True)
     report = {'status': 'FAILED', 'stage': stage}
+    if (ROOT / 'wechat.apk').is_file():
+        report['apkSha256'] = apk_digest(ROOT / 'wechat.apk')
     try:
         stage = 'AUTOMATION_SETUP'
         adb('push', str(ROOT / 'ui-hierarchy.jar'), '/data/local/tmp/ui-hierarchy.jar')

@@ -27,7 +27,7 @@ class RuntimeCompatibilityResolver(
 ) {
     private val targets = targets.filter {
         it.verificationStatus == VerificationStatus.STATIC_VERIFIED ||
-            it.verificationStatus == VerificationStatus.RUNTIME_VERIFIED_LOCAL
+            it.verificationStatus.runtimeVerified
     }
 
     fun resolve(build: InstalledBuild): RuntimeResolution {

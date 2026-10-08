@@ -32,4 +32,10 @@ enum class VerificationStatus {
 
     @SerialName("runtime-verified-local")
     RUNTIME_VERIFIED_LOCAL,
+
+    @SerialName("runtime-verified-hosted")
+    RUNTIME_VERIFIED_HOSTED;
+
+    val runtimeVerified: Boolean
+        get() = this == RUNTIME_VERIFIED_LOCAL || this == RUNTIME_VERIFIED_HOSTED
 }

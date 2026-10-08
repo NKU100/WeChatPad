@@ -7,6 +7,13 @@ import kotlin.test.assertNull
 
 class CandidateCompatibilityAnalyzerTest {
     @Test
+    fun hostedRuntimeVerificationRemainsUsableAsABaseline() {
+        val baseline = forwardSafeSameShapeBaseline().copy(verificationStatus = VerificationStatus.RUNTIME_VERIFIED_HOSTED)
+        val report = analyze(baseline = baseline)
+        assertEquals(CandidatePipelineStatus.STATIC_VERIFIED_PENDING_RUNTIME, report.status)
+    }
+
+    @Test
     fun generatesAStaticProfileWhenEveryForwardSafeHookMatchesUniquely() {
         val report = analyze(baseline = forwardSafeSameShapeBaseline())
 
@@ -135,8 +142,8 @@ class CandidateCompatibilityAnalyzerTest {
         assertEquals(
             CandidatePipelineStatus.RUNTIME_REJECTED,
             CandidatePipelineStateMachine.transition(
-                CandidatePipelineStatus.WAITING_LOCAL_RUNTIME,
-                CandidatePipelineEvent.LOCAL_RUNTIME_FAILED,
+                CandidatePipelineStatus.WAITING_RUNTIME,
+                CandidatePipelineEvent.RUNTIME_FAILED,
             ),
         )
     }
@@ -151,8 +158,8 @@ class CandidateCompatibilityAnalyzerTest {
         assertEquals(CandidatePipelineStatus.STATIC_VERIFIED_PENDING_RUNTIME, status)
 
         status = CandidatePipelineStateMachine.transition(status, CandidatePipelineEvent.DRAFT_PR_CREATED)
-        status = CandidatePipelineStateMachine.transition(status, CandidatePipelineEvent.LOCAL_RUNTIME_PASSED)
-        assertEquals(CandidatePipelineStatus.LOCAL_RUNTIME_VERIFIED, status)
+        status = CandidatePipelineStateMachine.transition(status, CandidatePipelineEvent.RUNTIME_PASSED)
+        assertEquals(CandidatePipelineStatus.RUNTIME_VERIFIED, status)
         status = CandidatePipelineStateMachine.transition(status, CandidatePipelineEvent.PULL_REQUEST_MERGED)
 
         assertEquals(CandidatePipelineStatus.FORMALLY_SUPPORTED, status)
@@ -184,7 +191,7 @@ class CandidateCompatibilityAnalyzerTest {
             CandidatePipelineEvent.REGISTERED_RUNTIME_VERIFICATION_CONFIRMED,
         )
 
-        assertEquals(CandidatePipelineStatus.LOCAL_RUNTIME_VERIFIED, status)
+        assertEquals(CandidatePipelineStatus.RUNTIME_VERIFIED, status)
     }
 
     @Test
@@ -198,7 +205,7 @@ class CandidateCompatibilityAnalyzerTest {
             profileMergedToMain = false,
         )
 
-        assertEquals(CandidatePipelineStatus.LOCAL_RUNTIME_VERIFIED, report.status)
+        assertEquals(CandidatePipelineStatus.RUNTIME_VERIFIED, report.status)
     }
 
     private fun analyze(

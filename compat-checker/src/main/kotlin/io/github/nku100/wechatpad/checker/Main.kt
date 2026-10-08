@@ -88,7 +88,7 @@ private fun analyzeCandidate(arguments: CandidateArguments) {
     } ?: run {
         val baseline = targets
             .filter {
-                it.verificationStatus == VerificationStatus.RUNTIME_VERIFIED_LOCAL &&
+                it.verificationStatus.runtimeVerified &&
                     it.identity.versionCode < identity.versionCode
             }
             .maxByOrNull { it.identity.versionCode }

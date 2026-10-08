@@ -1,0 +1,103 @@
+name: Replay hosted runtime pipeline
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+      - name: Install module SDK
+        run: sdkmanager 'platforms;android-37.2' 'build-tools;37.0.0'
+      - name: Prepare registered replay candidate
+        run: |
+          mkdir -p runtime-inputs
+          python3 - <<'PY'
+          import json, subprocess, hashlib
+          from pathlib import Path
+          profile = next(p for p in json.loads(Path('compatibility/targets.json').read_text()) if p['identity']['versionName'] == '8.0.79')
+          apk = Path('runtime-inputs/wechat.apk')
+          subprocess.run(['curl', '--fail', '--location', '--silent', '--show-error', '--retry', '2', '--connect-timeout', '20', '--max-time', '300', '--proto', '=https', '--proto-redir', '=https', profile['sourceUrl'], '-o', str(apk)], check=True)
+          with apk.open('rb') as stream:
+              assert hashlib.file_digest(stream, 'sha256').hexdigest() == profile['identity']['apkSha256']
+          profile['verificationStatus'] = 'static-verified'
+          report = {'status': 'STATIC_VERIFIED_PENDING_RUNTIME', 'identity': profile['identity'], 'sourceUrl': profile['sourceUrl'], 'suggestedProfile': profile, 'checkedVersions': ['8.0.79'], 'replay': True}
+          Path('runtime-inputs/candidate-report.json').write_text(json.dumps(report, indent=2) + '\n')
+          PY
+      - name: Check real APK and build replay module
+        run: |
+          ./gradlew --no-daemon :compat-checker:run --args='check --targets compatibility/targets.json --apk runtime-inputs/wechat.apk'
+          ./gradlew --no-daemon :app:assembleDebug
+          cp app/build/outputs/apk/debug/app-debug.apk runtime-inputs/app-debug.apk
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wechatpad-adapted-module
+          path: runtime-inputs/app-debug.apk
+          retention-days: 7
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wechatpad-runtime-candidate
+          path: |
+            runtime-inputs/wechat.apk
+            runtime-inputs/candidate-report.json
+          retention-days: 7
+
+  runtime:
+    needs: prepare
+    uses: ./.github/workflows/hosted-lsposed-smoke.yml
+    with:
+      module_run_id: ${{ github.run_id }}
+      module_artifact: wechatpad-adapted-module
+      candidate_artifact: wechatpad-runtime-candidate
+
+  result:
+    needs: [prepare, runtime]
+    if: always() && needs.prepare.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: wechatpad-runtime-candidate
+          path: runtime-result
+      - uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          name: hosted-lsposed-smoke
+          path: runtime-result/evidence
+      - name: Validate pipeline acceptance without publishing support
+        env:
+          SMOKE_CONCLUSION: ${{ needs.runtime.result }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          from scripts.ci.runtime_task import runtime_result
+          directory = Path('runtime-result')
+          evidence = directory / 'evidence/hosted-lsp/evidence/smoke-report.json'
+          smoke = json.loads(evidence.read_text()) if evidence.is_file() else {}
+          report = runtime_result(json.loads((directory / 'candidate-report.json').read_text()), smoke, os.environ['SMOKE_CONCLUSION'])
+          (directory / 'runtime-candidate-report.json').write_text(json.dumps(report, indent=2) + '\n')
+          with Path(os.environ['GITHUB_STEP_SUMMARY']).open('a') as summary:
+              summary.write(f'## Replay result\n\n`{report["status"]}`\n\nNo Codex invocation, PR or formal support update.\n')
+          assert report['status'] == 'RUNTIME_VERIFIED', report
+          PY
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: wechatpad-runtime-result
+          path: runtime-result/runtime-candidate-report.json
+          retention-days: 14

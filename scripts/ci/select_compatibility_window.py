@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 
 
-SUPPORTED_STATUS = "runtime-verified-local"
+SUPPORTED_STATUSES = {"runtime-verified-local", "runtime-verified-hosted"}
 
 
 def select_regression_targets(targets: list[dict], candidate_version_code: int) -> list[dict]:
@@ -23,7 +23,7 @@ def select_regression_targets(targets: list[dict], candidate_version_code: int) 
         if version_code in seen_version_codes:
             raise ValueError(f"duplicate version code in compatibility targets: {version_code}")
         seen_version_codes.add(version_code)
-        if target.get("verificationStatus") == SUPPORTED_STATUS:
+        if target.get("verificationStatus") in SUPPORTED_STATUSES:
             supported.append((version_code, target))
 
     supported.sort(key=lambda item: item[0])

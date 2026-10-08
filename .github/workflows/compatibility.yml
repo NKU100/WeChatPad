@@ -400,6 +400,8 @@ jobs:
     outputs:
       pipeline_status: ${{ steps.publish.outputs.pipeline_status || steps.adaptation-failure.outputs.pipeline_status }}
       pr_url: ${{ steps.publish.outputs.pr_url }}
+      head_sha: ${{ steps.publish.outputs.head_sha }}
+      issue: ${{ steps.claim.outputs.issue }}
     permissions:
       contents: write
       issues: write
@@ -414,14 +416,13 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
 
-      - name: Verify private repository and authentication configuration
+      - name: Verify trusted trigger and authentication configuration
         env:
-          REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
           CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
           GH_TOKEN: ${{ secrets.CODEX_AUTH_WRITE_TOKEN }}
         run: |
           set -euo pipefail
-          [[ "$REPOSITORY_PRIVATE" == 'true' ]] || { echo 'Managed account authentication requires a private repository.'; exit 1; }
+          [[ "$GITHUB_EVENT_NAME" == 'workflow_dispatch' && "$GITHUB_REF" == 'refs/heads/main' ]] || { echo 'Managed authentication requires a manual main-branch run.'; exit 1; }
           [[ -n "$CODEX_AUTH_JSON" && -n "$GH_TOKEN" ]] || { echo 'Configure CODEX_AUTH_JSON and CODEX_AUTH_WRITE_TOKEN before starting Codex.'; exit 1; }
           gh api "repos/$GITHUB_REPOSITORY/actions/secrets/public-key" >/dev/null
 
@@ -585,6 +586,41 @@ jobs:
           cd "$CONTROLLER_ROOT"
           python3 -m scripts.ci.codex_adaptation validate --directory "$CODEX_TASK_DIR"
 
+      - name: Export validated runtime inputs
+        if: success() && steps.claim.outputs.claimed == 'true'
+        run: |
+          python3 - <<'PYEXPORT'
+          import json, os, shutil
+          from pathlib import Path
+          task = Path(os.environ['CODEX_TASK_DIR'])
+          checkout = Path(json.loads((task / 'state.json').read_text())['worktree'])
+          destination = Path('runtime-inputs')
+          destination.mkdir()
+          shutil.copyfile(checkout / 'app/build/outputs/apk/debug/app-debug.apk', destination / 'app-debug.apk')
+          shutil.copyfile(checkout / 'work/apks/candidate.apk', destination / 'wechat.apk')
+          shutil.copyfile(task / 'candidate-report.json', destination / 'candidate-report.json')
+          PYEXPORT
+
+      - name: Upload validated module APK
+        if: success() && steps.claim.outputs.claimed == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: wechatpad-adapted-module
+          path: runtime-inputs/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload verified runtime candidate
+        if: success() && steps.claim.outputs.claimed == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: wechatpad-runtime-candidate
+          path: |
+            runtime-inputs/wechat.apk
+            runtime-inputs/candidate-report.json
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Publish statically verified draft PR
         if: success() && steps.claim.outputs.claimed == 'true'
         id: publish
@@ -595,16 +631,6 @@ jobs:
           cd "$CONTROLLER_ROOT"
           python3 -m scripts.ci.codex_task publish \
             --directory "$CODEX_TASK_DIR" --issue '${{ steps.claim.outputs.issue }}'
-
-      - name: Start build workflow for the generated PR
-        if: success() && steps.publish.outputs.pr_url != ''
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ADAPTATION_PR: ${{ steps.publish.outputs.pr_url }}
-        run: |
-          branch="$(gh pr view "$ADAPTATION_PR" --json headRefName --jq .headRefName)"
-          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$branch"
 
       - name: Record adaptation failure without retrying
         if: failure() && steps.claim.outputs.claimed == 'true' && steps.publish.outputs.pr_url == ''
@@ -643,3 +669,64 @@ jobs:
             ${{ runner.temp }}/wechatpad-adaptation/adaptation.patch
           if-no-files-found: warn
           retention-days: 14
+
+  runtime:
+    name: Smoke adapted candidate on hosted AVD
+    needs: adapt
+    if: needs.adapt.outputs.pr_url != ''
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/hosted-lsposed-smoke.yml
+    with:
+      module_run_id: ${{ github.run_id }}
+      module_artifact: wechatpad-adapted-module
+      candidate_artifact: wechatpad-runtime-candidate
+
+  runtime-result:
+    name: Record runtime acceptance
+    needs: [adapt, runtime]
+    if: always() && needs.adapt.outputs.pr_url != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/download-artifact@v8
+        with:
+          name: wechatpad-codex-adaptation
+          path: runtime-result
+      - name: Download runtime evidence
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: hosted-lsposed-smoke
+          path: runtime-result/evidence
+      - name: Record verified profile or rejection
+        id: record
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ADAPTATION_PR: ${{ needs.adapt.outputs.pr_url }}
+          TESTED_HEAD: ${{ needs.adapt.outputs.head_sha }}
+          ADAPTATION_ISSUE: ${{ needs.adapt.outputs.issue }}
+          SMOKE_CONCLUSION: ${{ needs.runtime.result }}
+        run: |
+          gh auth setup-git
+          python3 -m scripts.ci.runtime_task \
+            --directory runtime-result \
+            --smoke runtime-result/evidence/hosted-lsp/evidence/smoke-report.json \
+            --conclusion "$SMOKE_CONCLUSION" --pr "$ADAPTATION_PR" \
+            --head "$TESTED_HEAD" --issue "$ADAPTATION_ISSUE"
+      - name: Upload pipeline acceptance report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: wechatpad-runtime-result
+          path: runtime-result/runtime-candidate-report.json
+          retention-days: 14
+          if-no-files-found: warn

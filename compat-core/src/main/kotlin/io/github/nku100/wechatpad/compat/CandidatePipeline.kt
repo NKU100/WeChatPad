@@ -8,8 +8,8 @@ enum class CandidatePipelineStatus {
     APK_VERIFIED,
     ADAPTATION_RUNNING,
     STATIC_VERIFIED_PENDING_RUNTIME,
-    WAITING_LOCAL_RUNTIME,
-    LOCAL_RUNTIME_VERIFIED,
+    WAITING_RUNTIME,
+    RUNTIME_VERIFIED,
     FORMALLY_SUPPORTED,
     FETCH_FAILED,
     IDENTITY_REJECTED,
@@ -30,9 +30,9 @@ enum class CandidatePipelineEvent {
     STATIC_REGRESSION_PASSED,
     STATIC_REGRESSION_FAILED,
     DRAFT_PR_CREATED,
-    LOCAL_RUNTIME_PASSED,
+    RUNTIME_PASSED,
     REGISTERED_RUNTIME_VERIFICATION_CONFIRMED,
-    LOCAL_RUNTIME_FAILED,
+    RUNTIME_FAILED,
     PULL_REQUEST_MERGED,
 }
 
@@ -60,14 +60,14 @@ object CandidatePipelineStateMachine {
         CandidatePipelineStatus.ADAPTATION_RUNNING to CandidatePipelineEvent.STATIC_REGRESSION_FAILED ->
             CandidatePipelineStatus.STATIC_REGRESSION_FAILED
         CandidatePipelineStatus.STATIC_VERIFIED_PENDING_RUNTIME to CandidatePipelineEvent.DRAFT_PR_CREATED ->
-            CandidatePipelineStatus.WAITING_LOCAL_RUNTIME
-        CandidatePipelineStatus.WAITING_LOCAL_RUNTIME to CandidatePipelineEvent.LOCAL_RUNTIME_PASSED ->
-            CandidatePipelineStatus.LOCAL_RUNTIME_VERIFIED
+            CandidatePipelineStatus.WAITING_RUNTIME
+        CandidatePipelineStatus.WAITING_RUNTIME to CandidatePipelineEvent.RUNTIME_PASSED ->
+            CandidatePipelineStatus.RUNTIME_VERIFIED
         CandidatePipelineStatus.STATIC_VERIFIED_PENDING_RUNTIME to CandidatePipelineEvent.REGISTERED_RUNTIME_VERIFICATION_CONFIRMED ->
-            CandidatePipelineStatus.LOCAL_RUNTIME_VERIFIED
-        CandidatePipelineStatus.WAITING_LOCAL_RUNTIME to CandidatePipelineEvent.LOCAL_RUNTIME_FAILED ->
+            CandidatePipelineStatus.RUNTIME_VERIFIED
+        CandidatePipelineStatus.WAITING_RUNTIME to CandidatePipelineEvent.RUNTIME_FAILED ->
             CandidatePipelineStatus.RUNTIME_REJECTED
-        CandidatePipelineStatus.LOCAL_RUNTIME_VERIFIED to CandidatePipelineEvent.PULL_REQUEST_MERGED ->
+        CandidatePipelineStatus.RUNTIME_VERIFIED to CandidatePipelineEvent.PULL_REQUEST_MERGED ->
             CandidatePipelineStatus.FORMALLY_SUPPORTED
         else -> error("Illegal candidate pipeline transition: $current + $event")
     }
@@ -273,7 +273,7 @@ object CandidateCompatibilityAnalyzer {
         }
 
         status = CandidatePipelineStateMachine.transition(status, CandidatePipelineEvent.STATIC_REGRESSION_PASSED)
-        if (target.verificationStatus == VerificationStatus.RUNTIME_VERIFIED_LOCAL) {
+        if (target.verificationStatus.runtimeVerified) {
             status = CandidatePipelineStateMachine.transition(
                 status,
                 CandidatePipelineEvent.REGISTERED_RUNTIME_VERIFICATION_CONFIRMED,
@@ -396,8 +396,8 @@ object CandidateCompatibilityAnalyzer {
         candidate: BuildIdentity,
         checkedVersions: List<String>,
     ): String? {
-        if (baseline.verificationStatus != VerificationStatus.RUNTIME_VERIFIED_LOCAL) {
-            return "Baseline profile has not completed local runtime verification"
+        if (!baseline.verificationStatus.runtimeVerified) {
+            return "Baseline profile has not completed runtime verification"
         }
         if (baseline.identity.versionCode >= candidate.versionCode) {
             return "Baseline version must be older than the candidate"

@@ -1,0 +1,83 @@
+"""Promote an adapted profile only after hosted smoke of the exact APK succeeds."""
+import argparse
+import copy
+import json
+import os
+import subprocess
+from pathlib import Path
+
+from scripts.ci.codex_task import gh, issue_body, write_issue
+from scripts.ci.discover_latest_wechat import append_github_output
+
+
+def runtime_result(report, smoke, conclusion):
+    if report['status'] != 'STATIC_VERIFIED_PENDING_RUNTIME':
+        raise ValueError('Runtime acceptance requires static verification')
+    result = copy.deepcopy(report)
+    verified = (conclusion == 'success' and smoke.get('status') == 'RUNTIME_SMOKE_VERIFIED'
+                and smoke.get('baseline') == 'NO_TABLET_ENTRY' and smoke.get('hooks') == 2
+                and smoke.get('qrPage') == 'LoginAsExDeviceUI'
+                and smoke.get('apkSha256') == report['identity']['apkSha256'])
+    result['status'] = 'RUNTIME_VERIFIED' if verified else 'RUNTIME_REJECTED'
+    result['blockers'] = [] if verified else ['Hosted runtime smoke failed or exact-build evidence is missing.']
+    if verified:
+        result['suggestedProfile']['verificationStatus'] = 'runtime-verified-hosted'
+    return result
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--directory', type=Path, required=True)
+    parser.add_argument('--smoke', type=Path, required=True)
+    parser.add_argument('--conclusion', required=True)
+    parser.add_argument('--pr', required=True)
+    parser.add_argument('--head', required=True)
+    parser.add_argument('--issue', required=True)
+    args = parser.parse_args()
+    directory = args.directory
+    report = json.loads((directory / 'candidate-report.json').read_text())
+    smoke = json.loads(args.smoke.read_text()) if args.smoke.is_file() else {}
+    result = runtime_result(report, smoke, args.conclusion)
+    repo = os.environ['GITHUB_REPOSITORY']
+    run_url = f"https://github.com/{repo}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
+    pr = json.loads(gh('pr', 'view', args.pr, '--repo', repo, '--json', 'headRefOid,headRefName,state,body'))
+    if pr['headRefOid'] != args.head or pr['state'] != 'OPEN':
+        raise ValueError('Adaptation PR changed or closed after the tested build; refusing to promote it')
+    if result['status'] == 'RUNTIME_VERIFIED':
+        # Read only the manifest from the tested commit; never execute PR scripts with write credentials.
+        manifest = 'compatibility/targets.json'
+        subprocess.run(['git', 'fetch', 'origin', args.head], check=True)
+        targets = json.loads(subprocess.check_output(['git', 'show', f'{args.head}:{manifest}']))
+        profile = next(p for p in targets if p['identity'] == report['identity'])
+        if profile != report['suggestedProfile']:
+            raise ValueError('Tested profile differs from the statically verified report')
+        profile['verificationStatus'] = 'runtime-verified-hosted'
+        blob = subprocess.check_output(['git', 'hash-object', '-w', '--stdin'],
+                                       input=(json.dumps(targets, indent=2) + '\n').encode()).decode().strip()
+        env = dict(os.environ, GIT_INDEX_FILE=str(directory.resolve() / 'promotion.index'))
+        subprocess.run(['git', 'read-tree', args.head], env=env, check=True)
+        subprocess.run(['git', 'update-index', '--cacheinfo', f'100644,{blob},{manifest}'], env=env, check=True)
+        tree = subprocess.check_output(['git', 'write-tree'], env=env).decode().strip()
+        env.update(GIT_AUTHOR_NAME='NKU100', GIT_COMMITTER_NAME='NKU100',
+                   GIT_AUTHOR_EMAIL='21164383+NKU100@users.noreply.github.com',
+                   GIT_COMMITTER_EMAIL='21164383+NKU100@users.noreply.github.com')
+        commit = subprocess.check_output(['git', 'commit-tree', tree, '-p', args.head, '-m',
+                                         'compat: record hosted runtime verification'], env=env).decode().strip()
+        subprocess.run(['git', 'push', 'origin', f'{commit}:refs/heads/{pr["headRefName"]}'], check=True)
+        body = directory / 'runtime-pr-body.md'
+        body.write_text(pr['body'] + f'\n\nHosted smoke passed: injection, Phone & Tablet entry and QR page. No account login. [Evidence]({run_url}). Ready for merge; formal support begins after merge.\n')
+        gh('pr', 'edit', args.pr, '--repo', repo, '--body-file', str(body))
+        gh('pr', 'ready', args.pr, '--repo', repo)
+    else:
+        body = directory / 'runtime-failure.md'
+        body.write_text(f'Hosted smoke rejected this build. [Diagnostics]({run_url}). No automatic Codex retry.\n')
+        gh('pr', 'comment', args.pr, '--repo', repo, '--body-file', str(body))
+    write_issue(repo, args.issue, issue_body(result, result['status'], run_url, args.pr), directory)
+    (directory / 'runtime-candidate-report.json').write_text(json.dumps(result, indent=2) + '\n')
+    append_github_output(Path(os.environ['GITHUB_OUTPUT']), {'pipeline_status': result['status']})
+    with Path(os.environ['GITHUB_STEP_SUMMARY']).open('a') as output:
+        output.write(f'## Hosted runtime result\n\nStatus: `{result["status"]}`\n\nPR: {args.pr}\n')
+
+
+if __name__ == '__main__':
+    main()

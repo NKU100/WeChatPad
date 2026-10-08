@@ -23,15 +23,15 @@
 
 ## Codex 适配
 
-`Run workflow` 中的 `run_codex` 默认为开启，只在私有仓库主分支发现可信的未登记构建时调用模型。关闭该选项可只运行静态检测。每个构建以版本码和完整 APK SHA-256 创建一次 Issue 记录；已有记录即跳过，失败或超时不会自动再次调用模型。任务串行运行，固定使用 `gpt-6-luna` 和 `xhigh`，关闭多代理能力，不自动升级模型。不设置模型进程或适配 job 的额外时间上限；任务仍受 GitHub Actions 平台限制，单次适配的订阅消耗取决于实际工作量。
+`Run workflow` 中的 `run_codex` 默认为开启，只在主分支手动运行中发现可信的未登记构建时调用模型。关闭该选项可只运行静态检测。每个构建以版本码和完整 APK SHA-256 创建一次 Issue 记录；已有记录即跳过，失败或超时不会自动再次调用模型。任务串行运行，固定使用 `gpt-6-luna` 和 `xhigh`，关闭多代理能力，不自动升级模型。不设置模型进程或适配 job 的额外时间上限；任务仍受 GitHub Actions 平台限制，单次适配的订阅消耗取决于实际工作量。
 
-模型在隔离 checkout 中检查真实 APK，可使用 jadx。控制器拒绝修改既有 profile、检查器、脚本、工作流和构建配置。新增 profile 必须使用已校验的身份和来源，状态只能为 `static-verified`。候选和最多两个较早正式支持版本分别经过共用检查器；核心测试、模块测试和 debug APK 构建通过后才发布 draft PR，并把 Issue 状态更新为 `WAITING_LOCAL_RUNTIME`。模型失败或静态检查失败时，Issue 和结果报告停留在 `NEEDS_HOOK_REVIEW`。
+模型在隔离 checkout 中检查真实 APK，可使用 jadx。控制器拒绝修改既有 profile、检查器、脚本、工作流和构建配置。新增 profile 必须使用已校验的身份和来源，状态只能为 `static-verified`。候选和最多两个较早正式支持版本分别经过共用检查器；核心测试、模块测试和 debug APK 构建通过后才发布 draft PR，并把 Issue 状态更新为 `WAITING_RUNTIME`。模型失败或静态检查失败时，Issue 和结果报告停留在 `NEEDS_HOOK_REVIEW`。
 
 PR 分支包含可用于本地 AVD 冒烟的静态适配。完成登录界面冒烟后在 PR 中记录结果，将 profile 更新为 `runtime-verified-local`，审阅合入主分支后再由兼容检测确认 `FORMALLY_SUPPORTED`。
 
 ## 订阅认证配置
 
-此流程使用 ChatGPT 管理的 Codex 登录，不使用 OpenAI API Key；它消耗订阅中的 Codex 用量。仅在可信私有仓库使用。需要两个 Actions Secrets：
+此流程使用 ChatGPT 管理的 Codex 登录，不使用 OpenAI API Key；它消耗订阅中的 Codex 用量。仅在主分支手动触发的可信工作流中使用；PR 或 fork 不可触发认证恢复。需要两个 Actions Secrets：
 
 | Secret | 用途 |
 |---|---|
@@ -55,3 +55,13 @@ runner 在模型调用前恢复凭据，之后即使模型失败也写回刷新�
 还需在仓库 Actions 设置中开启 **Allow GitHub Actions to create and approve pull requests**。GitHub 将创建与审批放在同一个开关；此流水线只创建 draft PR，不提交审批或合并。draft PR 发布使用权限受限的 `GITHUB_TOKEN`；由该 token 创建的 PR 通常不会自动触发其他 workflow，因此发布后显式手动触发构建 workflow。
 
 参考：[OpenAI managed-auth CI 指南](https://learn.chatgpt.com/docs/auth/ci-cd-auth)、[GitHub Secret 写入权限](https://docs.github.com/en/rest/actions/secrets#create-or-update-a-repository-secret)。
+
+## 托管运行时验证
+
+兼容检测由主分支手动触发。Codex 适配的静态检查和构建成功后，同一次运行调用 `hosted-lsposed-smoke.yml`，复用已校验的微信 APK 和模块 APK。托管 AVD 使用固定系统镜像、修补 ramdisk、Magisk 和官方 LSPosed；工作流安装框架、启用模块并验证无模块基线。
+
+通过标准为模块注入成功、Hook 安装无错误、Phone & Tablet 登录入口出现，且可进入稳定的二维码页。无需扫码、登录账号或验证双设备服务器会话。
+
+成功输出 `RUNTIME_VERIFIED`，更新候选为 `runtime-verified-hosted`，记录 PR 和 Issue；合并后才正式支持。失败输出 `RUNTIME_REJECTED`，保持草稿 PR，并上传截图、UI 树和日志。PR 被改动时拒绝使用旧运行结果晋级。
+
+`runtime-replay.yml` 可手动用已登记的 8.0.79 重放构建、静态检查、跨任务 artifact、托管冒烟和结果判定；不调用 Codex，不创建 PR 或修改正式支持清单。

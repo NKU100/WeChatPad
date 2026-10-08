@@ -24,6 +24,10 @@ class CodexAdaptationTest(unittest.TestCase):
         self.assertTrue(eligible_candidate(self.report, self.targets))
         self.assertEqual('3220-' + 'a' * 64, candidate_key(self.report))
 
+    def test_hosted_verified_profile_is_a_trusted_baseline(self):
+        self.targets[-1]['verificationStatus'] = 'runtime-verified-hosted'
+        self.assertTrue(eligible_candidate(self.report, self.targets))
+
     def test_known_version_or_rejected_identity_does_not_consume_model_usage(self):
         self.report['identity'] = self.targets[-1]['identity']
         self.assertFalse(eligible_candidate(self.report, self.targets))

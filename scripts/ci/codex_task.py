@@ -26,7 +26,7 @@ def issue_body(report, status, run_url, pr_url=""):
              f"Source: {report['sourceUrl']}", f"Run: {run_url}", "",
              "Model: `gpt-6-luna`; reasoning: `xhigh`; one adaptation attempt."]
     if pr_url:
-        lines.extend(["", f"Draft PR: {pr_url}", "Local login-screen runtime smoke is required before formal support."])
+        lines.extend(["", f"Draft PR: {pr_url}", "Hosted login-screen runtime evidence and merge are required before formal support."])
     else:
         lines.extend(["", "This build is claimed once. A failure or timeout is not retried automatically."])
     return "\n".join(lines) + "\n"
@@ -79,12 +79,12 @@ def publish(repo, directory, issue, run_url):
     versions = ", ".join(report["checkedVersions"])
     body.write_text(f"Adds the verified WeChat {report['identity']['versionName']} build as a static-verified profile.\n\n"
                     f"The shared checker passed for: {versions}. Shared-core and module tests and the debug APK build passed.\n\n"
-                    "Local runtime login-screen smoke is still required. Update the profile to runtime-verified-local only after recording that result.\n\n"
+                    "Hosted runtime smoke will check module injection, the Phone & Tablet entry and QR page before this PR is ready.\n\n"
                     f"[Adaptation run]({run_url}); tracks #{issue}.\n")
     url = gh("pr", "create", "--repo", repo, "--base", "main", "--head", branch, "--draft",
              "--title", f"feat: support WeChat {report['identity']['versionName']}", "--body-file", str(body))
-    write_issue(repo, issue, issue_body(report, "WAITING_LOCAL_RUNTIME", run_url, url), directory)
-    append_github_output(Path(os.environ["GITHUB_OUTPUT"]), {"pipeline_status": "WAITING_LOCAL_RUNTIME", "pr_url": url})
+    write_issue(repo, issue, issue_body(report, "WAITING_RUNTIME", run_url, url), directory)
+    append_github_output(Path(os.environ["GITHUB_OUTPUT"]), {"pipeline_status": "WAITING_RUNTIME", "pr_url": url, "head_sha": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=checkout).decode().strip()})
     print(url)
 
 
