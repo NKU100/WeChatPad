@@ -25,7 +25,8 @@ class CodexAdaptationTest(unittest.TestCase):
         self.assertEqual('3220-' + 'a' * 64, candidate_key(self.report))
 
     def test_older_unknown_build_cannot_bypass_the_latest_only_gate(self):
-        self.report['identity'].update(versionName='8.0.78', versionCode=3180)
+        baseline_code = max(p['identity']['versionCode'] for p in self.targets)
+        self.report['identity'].update(versionName='0.0.1', versionCode=baseline_code - 1)
         self.report['manualSelection'] = True
         with self.assertRaisesRegex(ValueError, 'newer'):
             eligible_candidate(self.report, self.targets)
