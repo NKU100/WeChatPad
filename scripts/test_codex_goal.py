@@ -48,6 +48,12 @@ class GoalTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'three'):
                 run_goal(FakeClient('complete'), Path(root), 'adapt', 10000)
 
+    def test_same_runtime_error_stops_even_when_evidence_directory_changes(self):
+        errors = [ValueError('No tablet entry. work/analysis/runtime/iteration-' + f'{i:03d}') for i in range(1, 4)]
+        with tempfile.TemporaryDirectory() as root, patch('scripts.ci.codex_goal.write_diagnostics'), patch('scripts.ci.codex_goal.verify', side_effect=errors):
+            with self.assertRaisesRegex(RuntimeError, 'three'):
+                run_goal(FakeClient(), Path(root), 'adapt with AVD', 500000)
+
     def test_budget_limit_stops_without_another_turn(self):
         client = FakeClient('budgetLimited')
         with tempfile.TemporaryDirectory() as root, patch('scripts.ci.codex_goal.write_diagnostics'), patch('scripts.ci.codex_goal.verify', side_effect=ValueError('missing profile')):

@@ -1,5 +1,6 @@
 """Expose only clean adaptation inputs and tool dependencies to the model server."""
 
+import json
 import shutil
 import sys
 from pathlib import Path
@@ -9,8 +10,12 @@ def model_command(directory, env, command):
     if sys.platform != 'linux':
         return command
     workspace = directory / 'checkout'
-    home = directory / 'model-home'
-    home.mkdir(exist_ok=True)
+    home = workspace / 'work/analysis/model-home'
+    home.mkdir(parents=True, exist_ok=True)
+    debug_key = Path(env['HOME']) / '.android/debug.keystore'
+    if debug_key.is_file():
+        (home / '.android').mkdir(exist_ok=True)
+        shutil.copyfile(debug_key, home / '.android/debug.keystore')
     gradle = home / '.gradle'
     cached = Path(env.get('GRADLE_USER_HOME', str(Path(env['HOME']) / '.gradle')))
     for name in ['caches/modules-2', 'wrapper/dists']:
@@ -18,6 +23,7 @@ def model_command(directory, env, command):
         if source.is_dir():
             shutil.copytree(source, gradle / name, dirs_exist_ok=True)
     env['HOME'] = str(home)
+    env['JAVA_TOOL_OPTIONS'] = f'-Duser.home="{home}"'
     env['GRADLE_USER_HOME'] = str(gradle)
     env['TMPDIR'] = '/tmp'
     env['WECHATPAD_JADX_LOCK'] = str(workspace / 'work/analysis/jadx.lock')
@@ -45,5 +51,16 @@ def model_command(directory, env, command):
     jadx = shutil.which('jadx', path=env['PATH'])
     if jadx:
         bind(Path(jadx).resolve().parent.parent)
+    state = json.loads((directory / 'state.json').read_text())
+    if state.get('runtime'):
+        tools = directory / 'device-tools'
+        (tools / 'bin').mkdir(parents=True, exist_ok=True)
+        wrapper = tools / 'bin/adb'
+        shutil.copyfile(Path(__file__).with_name('adb-device.sh'), wrapper)
+        wrapper.chmod(0o755)
+        bind(tools)
+        env['PATH'] = str(tools / 'bin') + ':' + env['PATH']
+        env['WECHATPAD_ADB_SOCKET'] = state['runtime']['socket']
+        env['WECHATPAD_ADB_SERIAL'] = state['runtime']['serial']
     args += ['--chdir', str(workspace), '--', *command]
     return args

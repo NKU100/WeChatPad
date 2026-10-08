@@ -163,7 +163,7 @@ def prepare(repository, report_path, candidate_apk, directory):
     (directory / "state.json").write_text(json.dumps(state, indent=2))
 
 
-def run_model(directory, prompt_path, token_budget=200_000):
+def run_model(directory, prompt_path, token_budget=500_000):
     from scripts.ci.codex_goal import run_model_goal
     run_model_goal(directory, prompt_path, token_budget)
 
@@ -212,7 +212,7 @@ def main():
     parser.add_argument("--apk", type=Path)
     parser.add_argument("--directory", type=Path)
     parser.add_argument("--prompt", type=Path)
-    parser.add_argument("--goal-token-budget", type=int, default=200_000)
+    parser.add_argument("--goal-token-budget", type=int, default=500_000)
     args = parser.parse_args()
     if args.stage == "eligibility":
         report = json.loads(args.report.read_text())

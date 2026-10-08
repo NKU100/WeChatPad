@@ -17,6 +17,18 @@ runtime Hook implementation or compat-core only when the inspected logic require
 it. Do not weaken matching just to make a check pass.
 Existing regression tests must remain unchanged; add new tests when necessary.
 
+When work/analysis/runtime-device.json exists, a disposable rooted AVD is ready
+with the exact candidate APK and official LSPosed. Use `adb shell`, `adb logcat`,
+`adb install`, `adb pull` and `adb exec-out screencap -p` to inspect and debug it.
+The adb launcher fixes the device and server: do not pass -s/-H/-P/-L or bypass
+it. Save screenshots and UI evidence under work/analysis. You may install your
+fresh module build, restart the app and inspect actual hook behavior. Do not
+scan QR codes or log into an account. The controller reinstalls the exact APK
+and your new module before independently checking the Phone & Tablet entry,
+installed hooks and a stable QR page after each completed turn. Failed probes
+provide screenshots, UI XML and logs under work/analysis/runtime. A unique
+static match alone does not prove the Hook controls the requested behavior.
+
 Allowed changes: compatibility/targets.json, app/src/main/kotlin,
 compat-core/src/main/kotlin, and their existing test directories. Do not modify
 the checker executable, workflow, scripts, build configuration, credentials,
@@ -30,7 +42,7 @@ Use this single agent only. Do not spawn subagents, launch another Codex process
 change model or reasoning settings, log in, read credentials, push, or create PRs.
 The controller will pause the goal after each turn and independently run the
 shared checker for the candidate and up to two older versions, plus module tests
-and build. If verification fails, use its feedback to continue in the same thread.
+and build, and independent runtime verification when the AVD is attached. If verification fails, use its feedback to continue in the same thread.
 Do not treat a final response as success; the controller must verify the files.
 After successful independent verification it will prepare a draft PR.
 

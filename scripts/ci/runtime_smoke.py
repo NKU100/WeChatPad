@@ -233,68 +233,85 @@ def apk_digest(path):
     return digest.hexdigest()
 
 
-def main():
+def prepare_environment(report):
+    global stage
+    stage = 'AUTOMATION_SETUP'
+    adb('push', str(ROOT / 'ui-hierarchy.jar'), '/data/local/tmp/ui-hierarchy.jar')
+    stage = 'BASELINE'
+    enable_page_size_backcompat()
+    save('page-size-compat.txt', adb('shell', 'getprop'))
+    adb('logcat', '-c')
+    save('wechat-install.txt', adb('install', '-r', '-g', str(ROOT / 'wechat.apk'), timeout=240))
+    ui = mobile_input('baseline-mobile')
+    if any(is_tablet_entry(n.get('text', '')) for n in nodes(ui)):
+        raise RuntimeError('Tablet choice already exists without WeChatPad; baseline does not establish module effect')
+    report['baseline'] = 'NO_TABLET_ENTRY'
+    stage = 'FRAMEWORK_INSTALL'
+    bootstrap_magisk()
+    adb('push', str(ROOT / 'lsposed.zip'), '/data/local/tmp/lsposed.zip')
+    save('zygisk-setting.txt', su(MAGISK + ' --sqlite "REPLACE INTO settings (key,value) VALUES (\'zygisk\',1)"'))
+    result = su('export PATH=/debug_ramdisk:/data/adb/magisk:$PATH; magisk --install-module /data/local/tmp/lsposed.zip', timeout=240, check=False)
+    save('lsposed-install.txt', result)
+    if result.returncode:
+        raise RuntimeError('Official LSPosed installer failed; see lsposed-install.txt')
+    save('module-install.txt', adb('install', '-r', str(ROOT / 'module/app-debug.apk'), timeout=120))
+    save('manager-install.txt', adb('install', '-r', str(ROOT / 'manager.apk'), timeout=120))
+    reboot()
+    stage = 'FRAMEWORK_START'
+    for _ in range(45):
+        daemon = su('pidof lspd', check=False)
+        if daemon.returncode == 0 and daemon.stdout.strip():
+            save('lspd-pid.txt', daemon)
+            break
+        time.sleep(2)
+    else:
+        raise RuntimeError('LSPosed daemon did not start after reboot')
+    stage = 'MODULE_ENABLE'
+    configure_manager()
+
+def probe_environment(report):
+    global stage
+    stage = 'HOOK_AND_LOGIN'
+    adb('shell', 'pm', 'clear', WECHAT)
+    adb('logcat', '-c')
+    ui = mobile_input('module-mobile')
+    choice = unique_node(ui, lambda n: is_tablet_entry(n.get('text', '')))
+    if choice is None:
+        raise RuntimeError('No tablet login choice after module enable')
+    tap(choice)
+    for _ in range(20):
+        activity, ui = snapshot('qr-current')
+        if qr_page_ready(activity, ui):
+            time.sleep(3)
+            activity, ui = snapshot('qr')
+            if qr_page_ready(activity, ui):
+                break
+        time.sleep(2)
+    else:
+        raise RuntimeError('Tablet login did not reach a stable rendered QR page')
+    logs = collect_logs()
+    if 'status=COMPATIBLE' not in logs or 'installed 2 WeChat hooks' not in logs:
+        raise RuntimeError('Rendered QR page was not accompanied by compatible WeChatPad hook installation logs')
+    report.update(status='RUNTIME_SMOKE_VERIFIED', stage='COMPLETE', hooks=2, qrPage='LoginAsExDeviceUI')
+
+def main(mode="full"):
     global stage
     EVIDENCE.mkdir(parents=True, exist_ok=True)
     report = {'status': 'FAILED', 'stage': stage}
     if (ROOT / 'wechat.apk').is_file():
         report['apkSha256'] = apk_digest(ROOT / 'wechat.apk')
     try:
-        stage = 'AUTOMATION_SETUP'
-        adb('push', str(ROOT / 'ui-hierarchy.jar'), '/data/local/tmp/ui-hierarchy.jar')
-        stage = 'BASELINE'
-        enable_page_size_backcompat()
-        save('page-size-compat.txt', adb('shell', 'getprop'))
-        adb('logcat', '-c')
-        save('wechat-install.txt', adb('install', '-r', '-g', str(ROOT / 'wechat.apk'), timeout=240))
-        ui = mobile_input('baseline-mobile')
-        if any(is_tablet_entry(n.get('text', '')) for n in nodes(ui)):
-            raise RuntimeError('Tablet choice already exists without WeChatPad; baseline does not establish module effect')
-        report['baseline'] = 'NO_TABLET_ENTRY'
-        stage = 'FRAMEWORK_INSTALL'
-        bootstrap_magisk()
-        adb('push', str(ROOT / 'lsposed.zip'), '/data/local/tmp/lsposed.zip')
-        save('zygisk-setting.txt', su(MAGISK + ' --sqlite "REPLACE INTO settings (key,value) VALUES (\'zygisk\',1)"'))
-        result = su('export PATH=/debug_ramdisk:/data/adb/magisk:$PATH; magisk --install-module /data/local/tmp/lsposed.zip', timeout=240, check=False)
-        save('lsposed-install.txt', result)
-        if result.returncode:
-            raise RuntimeError('Official LSPosed installer failed; see lsposed-install.txt')
-        save('module-install.txt', adb('install', '-r', str(ROOT / 'module/app-debug.apk'), timeout=120))
-        save('manager-install.txt', adb('install', '-r', str(ROOT / 'manager.apk'), timeout=120))
-        reboot()
-        stage = 'FRAMEWORK_START'
-        for _ in range(45):
-            daemon = su('pidof lspd', check=False)
-            if daemon.returncode == 0 and daemon.stdout.strip():
-                save('lspd-pid.txt', daemon)
-                break
-            time.sleep(2)
+        if mode in {'full', 'prepare'}:
+            prepare_environment(report)
+        if mode in {'full', 'probe'}:
+            if mode == 'probe':
+                if not (ROOT / 'prepared.json').is_file():
+                    raise RuntimeError('Runtime environment has not passed baseline preparation')
+                report['baseline'] = 'NO_TABLET_ENTRY'
+            probe_environment(report)
         else:
-            raise RuntimeError('LSPosed daemon did not start after reboot')
-        stage = 'MODULE_ENABLE'
-        configure_manager()
-        stage = 'HOOK_AND_LOGIN'
-        adb('shell', 'pm', 'clear', WECHAT)
-        adb('logcat', '-c')
-        ui = mobile_input('module-mobile')
-        choice = unique_node(ui, lambda n: is_tablet_entry(n.get('text', '')))
-        if choice is None:
-            raise RuntimeError('No tablet login choice after module enable')
-        tap(choice)
-        for _ in range(20):
-            activity, ui = snapshot('qr-current')
-            if qr_page_ready(activity, ui):
-                time.sleep(3)
-                activity, ui = snapshot('qr')
-                if qr_page_ready(activity, ui):
-                    break
-            time.sleep(2)
-        else:
-            raise RuntimeError('Tablet login did not reach a stable rendered QR page')
-        logs = collect_logs()
-        if 'status=COMPATIBLE' not in logs or 'installed 2 WeChat hooks' not in logs:
-            raise RuntimeError('Rendered QR page was not accompanied by compatible WeChatPad hook installation logs')
-        report.update(status='RUNTIME_SMOKE_VERIFIED', stage='COMPLETE', hooks=2, qrPage='LoginAsExDeviceUI')
+            report.update(status='ENVIRONMENT_READY', stage='READY')
+            (ROOT / 'prepared.json').write_text(json.dumps(report) + '\n')
     except Exception as error:
         report.update(stage=stage, reason=str(error))
         try:
@@ -307,7 +324,7 @@ def main():
         (EVIDENCE / 'summary.md').write_text('# WeChat runtime smoke\n\n' + json.dumps(report, indent=2)
                                             + '\n\nNo QR scanning, account login or dual-device session was performed.\n')
         print(json.dumps(report))
-    return 0 if report['status'] == 'RUNTIME_SMOKE_VERIFIED' else 1
+    return 0 if report['status'] in {'RUNTIME_SMOKE_VERIFIED', 'ENVIRONMENT_READY'} else 1
 
 
 if __name__ == '__main__':

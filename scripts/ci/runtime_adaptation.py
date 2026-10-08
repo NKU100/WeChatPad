@@ -1,0 +1,104 @@
+"""Attach a disposable AVD and independently validate every adaptation turn."""
+import argparse
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+
+from scripts.ci import runtime_smoke as smoke
+from scripts.ci.codex_adaptation import sha256
+
+
+def configure(directory):
+    state = json.loads((directory / 'state.json').read_text())
+    root = Path(state['runtime']['root'])
+    smoke.ROOT = root
+    socket = Path(state['runtime']['socket'])
+    os.environ['ADB_SERVER_SOCKET'] = 'localfilesystem:' + str(socket)
+    os.environ['ANDROID_SERIAL'] = state['runtime']['serial']
+    return state, root
+
+
+def initialize(directory, root, serial):
+    devices = subprocess.check_output(['adb', 'devices'], text=True).splitlines()[1:]
+    connected = [line.split()[0] for line in devices if line.strip()]
+    if connected != [serial] or not serial.startswith('emulator-'):
+        raise RuntimeError('Runtime adaptation requires exactly one disposable emulator')
+    state_path = directory / 'state.json'
+    state = json.loads(state_path.read_text())
+    workspace = Path(state['worktree'])
+    if sha256(root / 'wechat.apk') != state['report']['identity']['apkSha256']:
+        raise ValueError('Runtime candidate does not match verified identity')
+    smoke.ROOT = root
+    smoke.EVIDENCE = root / 'prepare-evidence'
+    os.environ['ANDROID_SERIAL'] = serial
+    if smoke.main(mode='prepare'):
+        raise RuntimeError('AVD preparation failed before model invocation; see preparation evidence')
+    socket = workspace / 'work/analysis/adb.sock'
+    # The controller has already verified root, baseline UI and official LSPosed.
+    # Move the dedicated ADB server to a filesystem socket visible inside the model sandbox.
+    subprocess.run(['adb', 'kill-server'], check=True)
+    address = 'localfilesystem:' + str(socket)
+    subprocess.run(['adb', '-L', address, 'start-server'], check=True)
+    env = dict(os.environ, ADB_SERVER_SOCKET=address, ANDROID_SERIAL=serial)
+    subprocess.run(['adb', 'wait-for-device'], env=env, check=True, timeout=120)
+    devices = subprocess.check_output(['adb', 'devices'], env=env, text=True).splitlines()[1:]
+    connected = [line.split()[0] for line in devices if line.strip()]
+    if connected != [serial]:
+        raise RuntimeError('The model ADB server must expose exactly the dedicated emulator')
+    state['runtime'] = {'root': str(root), 'serial': serial, 'socket': str(socket)}
+    state_path.write_text(json.dumps(state, indent=2))
+    (workspace / 'work/analysis/runtime-device.json').write_text(json.dumps({
+        'serial': serial, 'baseline': 'NO_TABLET_ENTRY',
+        'instructions': 'Use adb device commands to inspect this disposable AVD. Screenshots and logs can be saved under work/analysis. Independent runtime verification runs after every completed turn.'}, indent=2))
+
+
+def verify_runtime(directory):
+    state, root = configure(directory)
+    workspace = Path(state['worktree'])
+    apk = workspace / 'app/build/outputs/apk/debug/app-debug.apk'
+    iteration = len(list(root.glob('iteration-*'))) + 1
+    smoke.EVIDENCE = root / f'iteration-{iteration:03d}'
+    smoke.EVIDENCE.mkdir(parents=True)
+    try:
+        # Reinstall the controller's immutable exact candidate before every independent probe.
+        if sha256(root / 'wechat.apk') != state['report']['identity']['apkSha256']:
+            raise ValueError('Runtime candidate changed after preparation')
+        smoke.adb('install', '-r', '-g', str(root / 'wechat.apk'), timeout=240)
+        result = smoke.adb('install', '-r', str(apk), timeout=120)
+        (smoke.EVIDENCE / 'module-install.txt').write_bytes(result.stdout + result.stderr)
+        smoke.reboot()
+        smoke.configure_manager()
+        result = smoke.main(mode='probe')
+    except Exception:
+        try:
+            smoke.snapshot('failure')
+            smoke.collect_logs()
+        finally:
+            evidence = workspace / 'work/analysis/runtime' / smoke.EVIDENCE.name
+            shutil.copytree(smoke.EVIDENCE, evidence, dirs_exist_ok=True)
+        raise
+    evidence = workspace / 'work/analysis/runtime' / smoke.EVIDENCE.name
+    shutil.copytree(smoke.EVIDENCE, evidence, dirs_exist_ok=True)
+    report = json.loads((smoke.EVIDENCE / 'smoke-report.json').read_text())
+    report['moduleApkSha256'] = sha256(apk)
+    (directory / 'runtime-report.json').write_text(json.dumps(report, indent=2) + '\n')
+    if result:
+        raise ValueError('Independent AVD verification failed: ' + report.get('reason', report['status'])
+                         + '. Inspect screenshots, UI XML and hook logs in ' + str(evidence.relative_to(workspace)))
+    if report.get('apkSha256') != state['report']['identity']['apkSha256']:
+        raise ValueError('Runtime evidence does not match the candidate APK')
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--directory', type=Path, required=True)
+    parser.add_argument('--root', type=Path, required=True)
+    parser.add_argument('--serial', default='emulator-5554')
+    args = parser.parse_args()
+    initialize(args.directory.resolve(), args.root.resolve(), args.serial)
+
+
+if __name__ == '__main__':
+    main()

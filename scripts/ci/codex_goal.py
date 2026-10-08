@@ -8,7 +8,7 @@ import subprocess
 from collections import deque
 from pathlib import Path
 
-DEFAULT_TOKEN_BUDGET = 200_000
+DEFAULT_TOKEN_BUDGET = 500_000
 
 
 def redact(text, secrets):
@@ -150,6 +150,10 @@ class AppServer:
 def verify(directory):
     from scripts.ci.codex_adaptation import validate
     validate(directory)
+    state = json.loads((directory / 'state.json').read_text())
+    if state.get('runtime'):
+        from scripts.ci.runtime_adaptation import verify_runtime
+        verify_runtime(directory)
 
 
 def write_diagnostics(directory, iterations, client):
@@ -184,6 +188,15 @@ def run_goal(client, directory, prompt, token_budget):
         'command': ['python3', '-c', probe],
         'cwd': str(workspace), 'timeoutMs': 10000,
         'sandboxPolicy': {'type': 'workspaceWrite', 'writableRoots': [str(workspace)], 'networkAccess': False}})
+    state_path = directory / 'state.json'
+    state = json.loads(state_path.read_text()) if state_path.is_file() else {}
+    if preflight.get('exitCode') == 0 and state.get('runtime'):
+        preflight = client.request('command/exec', {
+            'command': ['adb', 'get-state'], 'cwd': str(workspace), 'timeoutMs': 10000,
+            'sandboxPolicy': {'type': 'workspaceWrite', 'writableRoots': [str(workspace)], 'networkAccess': False}})
+        if preflight.get('stdout', '').strip() != 'device':
+            preflight['exitCode'] = 1
+            preflight['stderr'] = 'Dedicated AVD is inaccessible from the model sandbox: ' + preflight.get('stderr', '')
     if preflight.get('exitCode') != 0:
         raise RuntimeError('Sandbox preflight failed before model invocation: ' + str(preflight.get('stderr', ''))[:2000])
     from scripts.ci.codex_adaptation import MODEL, REASONING
@@ -192,6 +205,8 @@ def run_goal(client, directory, prompt, token_budget):
         'config': {'model_reasoning_effort': REASONING, 'features.multi_agent': False,
                    'features.multi_agent_v2': False, 'features.goals': True}})['thread']['id']
     objective = prompt + '\nComplete only when the exact candidate and old-build static checks and module tests/build pass. The controller will independently verify each turn and return failures. Do not weaken checks. If evidence is insufficient, explain it and mark the goal blocked.'
+    if state.get('runtime'):
+        objective += '\nThis Goal also requires independent AVD verification of installed hooks, the Phone & Tablet entry and a stable LoginAsExDeviceUI QR page. Use adb to debug the disposable emulator described in work/analysis/runtime-device.json. Static success alone is insufficient. Screenshots and runtime logs from rejected turns will be placed under work/analysis/runtime.'
     client.request('thread/goal/set', {'threadId': thread, 'objective': objective,
                                       'tokenBudget': token_budget, 'status': 'paused'})
     iterations = []
@@ -214,8 +229,9 @@ def run_goal(client, directory, prompt, token_budget):
             except (ValueError, OSError, RuntimeError, subprocess.SubprocessError, StopIteration) as error:
                 reason = verification_error(directory, error)
                 iterations.append({'turn': turn, 'status': 'verification-failed', 'goal': goal, 'error': reason})
-                repeated = repeated + 1 if reason == previous_error else 1
-                previous_error = reason
+                signature = re.sub(r'work/analysis/runtime/iteration-\d+', 'work/analysis/runtime/iteration', reason)
+                repeated = repeated + 1 if signature == previous_error else 1
+                previous_error = signature
                 write_diagnostics(directory, iterations, client)
                 if goal is None:
                     raise RuntimeError('Codex cleared its goal before verification completed')
