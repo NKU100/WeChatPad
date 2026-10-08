@@ -11,6 +11,9 @@ local.properties
 # Official test APKs and generated analysis output stay local.
 work/apks/
 work/analysis/
+work/static-regression/
+.cache/wechat-apks/
+**/__pycache__/
 
 # Signing material
 *.jks

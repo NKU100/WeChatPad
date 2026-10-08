@@ -24,6 +24,12 @@ class CodexAdaptationTest(unittest.TestCase):
         self.assertTrue(eligible_candidate(self.report, self.targets))
         self.assertEqual('3220-' + 'a' * 64, candidate_key(self.report))
 
+    def test_older_unknown_build_cannot_bypass_the_latest_only_gate(self):
+        self.report['identity'].update(versionName='8.0.78', versionCode=3180)
+        self.report['manualSelection'] = True
+        with self.assertRaisesRegex(ValueError, 'newer'):
+            eligible_candidate(self.report, self.targets)
+
     def test_hosted_verified_profile_is_a_trusted_baseline(self):
         self.targets[-1]['verificationStatus'] = 'runtime-verified-hosted'
         self.assertTrue(eligible_candidate(self.report, self.targets))

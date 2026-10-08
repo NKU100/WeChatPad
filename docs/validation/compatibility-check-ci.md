@@ -1,6 +1,6 @@
 # 兼容检测 CI
 
-工作流 `Check WeChat compatibility` 每天北京时间 10:23（UTC 02:23）自动触发，也可手动运行。它从微信官网首页发现最高版本的 ARM64 APK 候选。已正式支持且 APK 摘要未变化时提前结束，不启动静态矩阵、构建、Codex 或 AVD；手动选中 `force_recheck` 可重新静态检查。需要分析时再按候选版本选择静态回归窗口：新候选加上版本码最高的两个已正式支持旧版，已支持候选检查最近三个正式支持版本。报告列明本次实际检查的版本，历史 profile 保留。
+工作流 `Check WeChat compatibility` 每天北京时间 10:23（UTC 02:23）自动触发，也可手动运行。默认从微信官网首页发现最高版本的 ARM64 APK 候选。自动和手动触发均只检查官网最新 ARM64 APK，不提供指定版本入口。下载后以 APK 内实际版本、官方签名和 SHA-256 为准。已正式支持且 APK 摘要未变化时提前结束，不启动静态矩阵、构建、Codex 或 AVD；手动选中 `force_recheck` 可重新静态检查。需要分析时再按候选版本选择静态回归窗口：新候选加上版本码最高的两个已正式支持旧版，已支持候选检查候选本身和最多两个较早的正式支持版本。报告列明本次实际检查的版本，历史 profile 保留。
 
 ## 检查流程
 
@@ -21,9 +21,21 @@
 
 在仓库的 **Actions** 页面选择 **Check WeChat compatibility**，再点 **Run workflow** 即可运行。静态检测不使用签名 Secrets；新候选的后续托管冒烟会安装 Magisk/LSPosed 并启动 AVD。
 
+## 普通构建验证
+
+`Build module APK` 在 push、PR 和手动构建中运行核心、检查器、应用及 Python 流水线单元测试，检查模块元数据与打包内容，并对版本码最高的最多三个正式支持构建做真实 APK 静态回归。每次代码构建都会重新检查，已支持状态不会跳过回归。APK 仅从已登记的官方 URL 获取，按 SHA-256 缓存，每次使用前重新校验摘要；检查失败阻止构建通过并上传每个构建的日志和结果报告。
+
+普通构建和适配控制器共用 `scripts/ci/static_regression.py` 的下载校验及检查器调用。适配仍覆盖候选加最多两个旧版，使用预下载 APK 离线检查。普通构建不调用 Codex 或 AVD。单元测试验证解析、拒绝、缓存和 Hook 注册等逻辑；真实 APK 静态回归验证目标解析；实际注入和界面行为由动态冒烟验证。
+
+## 单版本运行验证
+
+`Validate WeChat runtime` 用于重放一个已支持版本的构建和托管 AVD 验证。它选择官网最新 APK；若该精确 APK 尚未登记并完成运行验证，则停止并提示先运行兼容适配，不自动换成已支持的其他版本。
+
+`Run WeChat runtime smoke` 的独立手动入口也检查官网最新 APK，使用同一套候选选择、官方下载和摘要校验逻辑。由适配流程调用时直接使用已经静态验证的精确候选产物。每次运行只启动一个版本的动态冒烟，静态回归仍最多覆盖三个版本。运行验证入口不调用 Codex、不创建 PR、不更新正式支持状态。
+
 ## Codex 适配
 
-`Run workflow` 中的 `run_codex` 默认为开启，只在主分支手动或定时运行中发现可信的未登记构建时调用模型。关闭该选项可只运行静态检测。每个构建以版本码和完整 APK SHA-256 创建一次 Issue 记录；已有记录即跳过，失败或超时不会自动再次调用模型。任务串行运行，固定使用 `gpt-6-luna` 和 `xhigh`，关闭多代理能力，不自动升级模型。不设置模型进程或适配 job 的额外时间上限；任务仍受 GitHub Actions 平台限制，单次适配的订阅消耗取决于实际工作量。
+`Run workflow` 中的 `run_codex` 默认为开启，只在主分支手动或定时运行中发现可信的未登记构建时调用模型。关闭该选项可只运行静态检测。每个构建以版本码和完整 APK SHA-256 维护 Issue 记录，只认可 `github-actions[bot]` 创建且带 `wechatpad-adaptation` 标签的记录，排除 PR。旧的机器人记录会补上标签，不重复适配。已有记录默认跳过，失败或超时不会自动再次调用模型。手动开启 `retry_adaptation` 可复用原 Issue 重试失败、取消、超时或跳过的适配；仍在执行的任务不能重试。已有适配 PR 时保留原 PR 和运行验证路径，不重新调用模型；运行验证未完成时使用原运行的重跑入口。任务串行运行，固定使用 `gpt-6-luna` 和 `xhigh`，关闭多代理能力，不自动升级模型。不设置模型进程或适配 job 的额外时间上限；任务仍受 GitHub Actions 平台限制，单次适配的订阅消耗取决于实际工作量。
 
 模型在隔离 checkout 中检查真实 APK，可使用 jadx。控制器拒绝修改既有 profile、检查器、脚本、工作流和构建配置。新增 profile 必须使用已校验的身份和来源，状态只能为 `static-verified`。候选和最多两个较早正式支持版本分别经过共用检查器；核心测试、模块测试和 debug APK 构建通过后才发布 draft PR，并把 Issue 状态更新为 `WAITING_RUNTIME`。模型失败或静态检查失败时，Issue 和结果报告停留在 `NEEDS_HOOK_REVIEW`。
 
@@ -62,8 +74,8 @@ runner 在模型调用前恢复凭据，之后即使模型失败也写回刷新�
 
 通过标准为模块注入成功、Hook 安装无错误、Phone & Tablet 登录入口出现，且可进入稳定的二维码页。无需扫码、登录账号或验证双设备服务器会话。
 
-成功输出 `RUNTIME_VERIFIED`，更新候选为 `runtime-verified-hosted`，记录 PR 和 Issue；合并后才正式支持。失败输出 `RUNTIME_REJECTED`，保持草稿 PR，并上传截图、UI 树和日志。PR 被改动时拒绝使用旧运行结果晋级。
+成功输出 `RUNTIME_VERIFIED`，更新候选为 `runtime-verified-hosted`，记录 PR 和 Issue；合并后才正式支持。失败输出 `RUNTIME_REJECTED`，保持草稿 PR，并上传截图、UI 树和日志。取消或跳过时保留 `STATIC_VERIFIED_PENDING_RUNTIME`，Issue 标记为 `WAITING_RUNTIME`，不发表运行失败评论，也不晋级候选。PR 被改动时拒绝使用旧运行结果晋级。托管冒烟串行执行，最多排队 100 次运行，后来的运行不会替换已有等待任务。
 
-`runtime-validation.yml` 可手动用已登记的 8.0.79 重放构建、静态检查、跨任务 artifact、托管冒烟和结果判定；不调用 Codex，不创建 PR 或修改正式支持清单。
+`runtime-validation.yml` 可手动用官网最新且已登记的精确 APK 重放构建、静态检查、跨任务 artifact、托管冒烟和结果判定；不调用 Codex，不创建 PR 或修改正式支持清单。
 
 勾选 `rebuild_ramdisk` 可同时从官方输入重建 root ramdisk，校验与 Release 产物逐字节一致，再执行冒烟。制作步骤及本地命令见 [AVD root ramdisk 制作](../environment/ramdisk-build.md)。

@@ -5,13 +5,13 @@ import hashlib
 import json
 import os
 import re
-import shlex
 import signal
 import subprocess
 from pathlib import Path
 
 from scripts.ci.discover_latest_wechat import append_github_output, validate_official_apk_url
 from scripts.ci.select_compatibility_window import select_regression_targets
+from scripts.ci.static_regression import check_apk, ensure_apk
 
 
 MODEL = "gpt-6-luna"
@@ -125,14 +125,7 @@ def prepare(repository, report_path, candidate_apk, directory):
     apks = [(report["identity"]["versionName"], "work/apks/candidate.apk")]
     for target in regression:
         identity = target["identity"]
-        cached = repository / ".cache/wechat-apks" / (identity["apkSha256"] + ".apk")
-        if not cached.is_file() or sha256(cached) != identity["apkSha256"]:
-            cached.parent.mkdir(parents=True, exist_ok=True)
-            subprocess.run(["curl", "--fail", "--silent", "--show-error", "--location", "--retry", "3",
-                            "--connect-timeout", "20", "--max-time", "600", "--proto", "=https", "--proto-redir", "=https",
-                            "--output", str(cached), target["sourceUrl"]], check=True)
-            if sha256(cached) != identity["apkSha256"]:
-                raise ValueError("Regression APK hash does not match the registered profile")
+        cached = ensure_apk(target, repository / ".cache/wechat-apks")
         destination = apk_dir / f"{identity['versionCode']}.apk"
         os.link(cached, destination)
         apks.append((identity["versionName"], str(destination.relative_to(worktree))))
@@ -176,11 +169,8 @@ def validate(directory):
     candidate = state["report"]
     for version, apk in state["apks"]:
         expected = next(p for p in after if p["identity"]["versionName"] == version)["identity"]["apkSha256"]
-        if sha256(worktree / apk) != expected:
-            raise ValueError("An APK changed after candidate verification")
-        args = shlex.join(["check", "--targets", "compatibility/targets.json", "--apk", apk])
-        run_bounded(["./gradlew", "--offline", "--no-daemon", ":compat-checker:run", "--args=" + args],
-                    worktree, dict(os.environ), directory / f"check-{version}.log", timeout=300)
+        check_apk(worktree, Path("compatibility/targets.json"), worktree / apk, expected,
+                  directory / f"check-{version}.log", offline=True)
     run_bounded(["./gradlew", "--offline", "--no-daemon", ":app:testDebugUnitTest", ":compat-core:test", ":compat-checker:test", ":app:assembleDebug"],
                 worktree, dict(os.environ), directory / "build.log", timeout=600)
     for path in new_files:

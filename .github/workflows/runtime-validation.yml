@@ -1,4 +1,4 @@
-name: Validate registered WeChat runtime
+name: Validate WeChat runtime
 
 on:
   workflow_dispatch:
@@ -29,19 +29,8 @@ jobs:
         run: sdkmanager 'platforms;android-37.2' 'build-tools;37.0.0'
       - name: Prepare registered replay candidate
         run: |
-          mkdir -p runtime-inputs
-          python3 - <<'PY'
-          import json, subprocess, hashlib
-          from pathlib import Path
-          profile = next(p for p in json.loads(Path('compatibility/targets.json').read_text()) if p['identity']['versionName'] == '8.0.79')
-          apk = Path('runtime-inputs/wechat.apk')
-          subprocess.run(['curl', '--fail', '--location', '--silent', '--show-error', '--retry', '2', '--connect-timeout', '20', '--max-time', '300', '--proto', '=https', '--proto-redir', '=https', profile['sourceUrl'], '-o', str(apk)], check=True)
-          with apk.open('rb') as stream:
-              assert hashlib.file_digest(stream, 'sha256').hexdigest() == profile['identity']['apkSha256']
-          profile['verificationStatus'] = 'static-verified'
-          report = {'status': 'STATIC_VERIFIED_PENDING_RUNTIME', 'identity': profile['identity'], 'sourceUrl': profile['sourceUrl'], 'suggestedProfile': profile, 'checkedVersions': ['8.0.79'], 'replay': True}
-          Path('runtime-inputs/candidate-report.json').write_text(json.dumps(report, indent=2) + '\n')
-          PY
+          python3 -m scripts.ci.candidate_selection \
+            --directory runtime-inputs
       - name: Check real APK and build replay module
         run: |
           ./gradlew --no-daemon :compat-checker:run --args='check --targets compatibility/targets.json --apk runtime-inputs/wechat.apk'

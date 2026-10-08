@@ -30,6 +30,30 @@ jobs:
       - name: Install project Android SDK packages
         run: sdkmanager 'platforms;android-37.2' 'build-tools;37.0.0'
 
+      - name: Run unit tests and verify module packaging
+        run: |
+          python3 -m unittest discover -s scripts -p 'test_*.py'
+          ./gradlew --no-daemon :compat-core:test :compat-checker:test :app:testDebugUnitTest :app:verifyModuleMetadata
+
+      - name: Restore official APK cache
+        uses: actions/cache@v5
+        with:
+          path: .cache/wechat-apks
+          key: wechatpad-static-apks-${{ hashFiles('compatibility/targets.json') }}
+          restore-keys: wechatpad-static-apks-
+
+      - name: Run registered-build static regression
+        run: python3 -m scripts.ci.static_regression
+
+      - name: Upload static regression diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: wechatpad-static-regression
+          path: work/static-regression/
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Build debug APK
         if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         shell: bash

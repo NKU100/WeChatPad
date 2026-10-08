@@ -96,7 +96,7 @@ DISCOVERED
 
 Codex 适配 worker 使用 GitHub 托管 runner，在主分支手动或定时触发的可信工作流中通过独立的 ChatGPT managed-auth 登录使用订阅用量。每个身份验证通过、尚未登记的新构建都进入 Codex 适配，不再仅限于 `NEEDS_HOOK_REVIEW`。静态检测的锚点推断结果作为分析输入，正式登记仍由经过静态回归的 draft PR 和托管运行时验收完成。
 
-worker 固定使用 `gpt-6-luna`、`xhigh`，禁用子代理，不设置模型进程的额外时间上限，不自动换模型或再次启动失败任务。版本码和 APK SHA-256 对应唯一 Issue 记录；重复发现已有记录时复用记录，不重复调用模型。适配任务串行使用 CI 独立登录状态；凭据从 Actions Secret 恢复，刷新后写回，模型进程不接收写回 token。凭据和原始模型输出不进入仓库或 artifact。具体配置见 [兼容检测 CI](../validation/compatibility-check-ci.md)。
+worker 固定使用 `gpt-6-luna`、`xhigh`，禁用子代理，不设置模型进程的额外时间上限，不自动换模型或再次启动失败任务。版本码和 APK SHA-256 对应唯一机器人 Issue 记录，并使用专用标签；普通用户 Issue 和 PR 不参与去重。重复发现已有记录时复用记录，不自动重复调用模型；手动可显式重试失败或取消的适配，已有 PR 则保留原运行验证路径。适配任务串行使用 CI 独立登录状态；凭据从 Actions Secret 恢复，刷新后写回，模型进程不接收写回 token。凭据和原始模型输出不进入仓库或 artifact。具体配置见 [兼容检测 CI](../validation/compatibility-check-ci.md)。
 
 静态回归和模块构建通过后，候选进入 `WAITING_RUNTIME`。适配任务上传模块 APK、候选微信 APK 和静态报告，再调用共用托管冒烟工作流。通过后进入 `RUNTIME_VERIFIED`，可信控制器校验 PR 仍对应被测提交，只更新候选 profile 为 `runtime-verified-hosted` 并将 PR 标为可审阅；失败进入 `RUNTIME_REJECTED` 并保留诊断和草稿 PR。只有该 PR 合并进主分支后，兼容分析才输出 `FORMALLY_SUPPORTED`。每日发现和手动运行均可驱动自动适配；每日运行默认启用 Codex，手动运行可以关闭 `run_codex`。OpenAI 用量限制或 worker 故障都不能绕过运行时冒烟和 PR 合并门槛。
 

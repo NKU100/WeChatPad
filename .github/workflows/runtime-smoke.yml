@@ -35,6 +35,7 @@ permissions:
 concurrency:
   group: wechatpad-runtime-smoke
   cancel-in-progress: false
+  queue: max
 
 jobs:
   smoke:
@@ -105,11 +106,8 @@ jobs:
       - name: Download and verify registered official WeChat
         if: inputs.candidate_artifact == ''
         run: |
-          source_url=$(python3 -c "import json; print(next(p['sourceUrl'] for p in json.load(open('compatibility/targets.json')) if p['identity']['versionName'] == '8.0.79'))")
-          source_sha=$(python3 -c "import json; print(next(p['identity']['apkSha256'] for p in json.load(open('compatibility/targets.json')) if p['identity']['versionName'] == '8.0.79'))")
-          curl --fail --location --silent --show-error --retry 2 --connect-timeout 20 --max-time 300 \
-            --proto '=https' --proto-redir '=https' "$source_url" -o work/runtime-smoke/wechat.apk
-          printf '%s  %s\n' "$source_sha" work/runtime-smoke/wechat.apk | sha256sum --check
+          python3 -m scripts.ci.candidate_selection \
+            --directory work/runtime-smoke
       - name: Verify official APK signer
         run: |
           sdkmanager 'build-tools;37.0.0'

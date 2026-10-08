@@ -36,6 +36,34 @@ class RuntimeTaskTest(unittest.TestCase):
                 self.assertEqual(result['status'], 'RUNTIME_REJECTED')
                 self.assertEqual(result['suggestedProfile']['verificationStatus'], 'static-verified')
 
+    def test_cancelled_or_skipped_smoke_preserves_pending_runtime_status(self):
+        for conclusion in ['cancelled', 'skipped']:
+            for smoke in [{}, self.smoke]:
+                with self.subTest(conclusion=conclusion, smoke=smoke):
+                    result = runtime_result(self.report, smoke, conclusion)
+                    self.assertEqual(result['status'], 'STATIC_VERIFIED_PENDING_RUNTIME')
+                    self.assertEqual(result['suggestedProfile']['verificationStatus'], 'static-verified')
+                    self.assertEqual(result['runtimeConclusion'], conclusion)
+
+    def test_cancelled_acceptance_writes_pending_report_without_rejection(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / 'candidate-report.json').write_text(json.dumps(self.report))
+            pr = {'headRefOid': 'tested', 'headRefName': 'adapt/test', 'state': 'OPEN', 'body': ''}
+            def github(*args):
+                if args[:2] == ('pr', 'view'):
+                    return json.dumps(pr)
+                self.fail('An inconclusive run must not reject or promote the PR')
+            env = {'GITHUB_REPOSITORY': 'owner/repo', 'GITHUB_RUN_ID': '1',
+                   'GITHUB_OUTPUT': str(root / 'output'), 'GITHUB_STEP_SUMMARY': str(root / 'summary')}
+            with patch.dict(os.environ, env), patch('sys.argv', ['runtime_task', '--directory', str(root),
+                      '--smoke', str(root / 'missing.json'), '--conclusion', 'cancelled', '--pr', '1',
+                      '--head', 'tested', '--issue', '2']), patch('scripts.ci.runtime_task.gh', side_effect=github), patch('scripts.ci.runtime_task.write_issue'):
+                main()
+            result = json.loads((root / 'runtime-candidate-report.json').read_text())
+            self.assertEqual(result['status'], 'STATIC_VERIFIED_PENDING_RUNTIME')
+            self.assertIn('pipeline_status=STATIC_VERIFIED_PENDING_RUNTIME', (root / 'output').read_text())
+
     def test_publication_changes_only_manifest_on_the_tested_commit(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

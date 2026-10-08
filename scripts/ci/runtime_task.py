@@ -14,6 +14,10 @@ def runtime_result(report, smoke, conclusion):
     if report['status'] != 'STATIC_VERIFIED_PENDING_RUNTIME':
         raise ValueError('Runtime acceptance requires static verification')
     result = copy.deepcopy(report)
+    if conclusion in {'cancelled', 'skipped'}:
+        result['runtimeConclusion'] = conclusion
+        result['blockers'] = ['Hosted runtime smoke did not complete; rerun runtime verification for this exact build.']
+        return result
     verified = (conclusion == 'success' and smoke.get('status') == 'RUNTIME_SMOKE_VERIFIED'
                 and smoke.get('baseline') == 'NO_TABLET_ENTRY' and smoke.get('hooks') == 2
                 and smoke.get('qrPage') == 'LoginAsExDeviceUI'
@@ -68,11 +72,12 @@ def main():
         body.write_text(pr['body'] + f'\n\nHosted smoke passed: injection, Phone & Tablet entry and QR page. No account login. [Evidence]({run_url}). Ready for merge; formal support begins after merge.\n')
         gh('pr', 'edit', args.pr, '--repo', repo, '--body-file', str(body))
         gh('pr', 'ready', args.pr, '--repo', repo)
-    else:
+    elif result['status'] == 'RUNTIME_REJECTED':
         body = directory / 'runtime-failure.md'
         body.write_text(f'Hosted smoke rejected this build. [Diagnostics]({run_url}). No automatic Codex retry.\n')
         gh('pr', 'comment', args.pr, '--repo', repo, '--body-file', str(body))
-    write_issue(repo, args.issue, issue_body(result, result['status'], run_url, args.pr), directory)
+    issue_status = 'WAITING_RUNTIME' if result['status'] == 'STATIC_VERIFIED_PENDING_RUNTIME' else result['status']
+    write_issue(repo, args.issue, issue_body(result, issue_status, run_url, args.pr), directory)
     (directory / 'runtime-candidate-report.json').write_text(json.dumps(result, indent=2) + '\n')
     append_github_output(Path(os.environ['GITHUB_OUTPUT']), {'pipeline_status': result['status']})
     with Path(os.environ['GITHUB_STEP_SUMMARY']).open('a') as output:

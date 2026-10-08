@@ -9,8 +9,12 @@ on:
         description: Run static regression even when the exact APK is already supported
         type: boolean
         default: false
+      retry_adaptation:
+        description: Retry a failed or cancelled adaptation for the latest exact APK
+        type: boolean
+        default: false
       run_codex:
-        description: Adapt verified unknown builds with gpt-6-luna/xhigh (one attempt)
+        description: Adapt verified unknown builds with gpt-6-luna/xhigh
         type: boolean
         default: true
 
@@ -34,7 +38,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Test official candidate discovery and cache validation
-        run: python3 -m unittest scripts.test_discover_latest_wechat scripts.test_discovery_gate
+        run: python3 -m unittest scripts.test_discover_latest_wechat scripts.test_candidate_selection scripts.test_discovery_gate
 
       - name: Test latest-three compatibility window selection
         run: python3 -m unittest scripts.test_select_compatibility_window
@@ -71,7 +75,7 @@ jobs:
           printf '# Latest official WeChat ARM64 compatibility check\n\n' \
             > compatibility-report/latest-official.md
 
-      - name: Discover latest official ARM64 APK
+      - name: Select official ARM64 APK
         id: discover
         run: |
           python3 -m scripts.ci.discover_latest_wechat \
@@ -496,13 +500,16 @@ jobs:
           cp -R scripts "$CONTROLLER_ROOT/scripts"
           cp .github/codex/adapt-wechat.md "$CONTROLLER_ROOT/adapt-wechat.md"
 
-      - name: Claim one adaptation attempt for this APK
+      - name: Claim or explicitly retry adaptation for this APK
         id: claim
         env:
           GH_TOKEN: ${{ github.token }}
+          RETRY_ADAPTATION: ${{ github.event_name == 'workflow_dispatch' && inputs.retry_adaptation }}
         run: |
           cd "$CONTROLLER_ROOT"
-          python3 -m scripts.ci.codex_task claim \
+          retry_args=()
+          if [[ "$RETRY_ADAPTATION" == 'true' ]]; then retry_args+=(--retry); fi
+          python3 -m scripts.ci.codex_task claim "${retry_args[@]}" \
             --report "$GITHUB_WORKSPACE/compatibility-report/candidate-report.json" \
             --targets "$GITHUB_WORKSPACE/compatibility/targets.json" \
             --directory "$CODEX_TASK_DIR"
