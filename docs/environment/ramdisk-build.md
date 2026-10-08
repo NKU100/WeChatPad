@@ -40,6 +40,8 @@ python3 scripts/environment/build_ramdisk.py \
 
 `BUILDER_SERIAL` 由本机选择，不存入仓库。制作 AVD 只负责执行 `magiskboot`，不需要 root、Magisk 或 LSPosed，也不必与目标系统版本相同。脚本拒绝实体设备 serial；在所选 AVD 的 `/data/local/tmp` 创建独立临时目录，结束时清理该目录。输入和输出通过 ADB 传输，目标 payload 架构不随制作 AVD 改变。
 
+本机没有 x86_64 原始 ramdisk 时，省略 `--stock-ramdisk` 即可自动下载固定版本的官方目标 ZIP；ARM64 制作 AVD 本身仍使用 ARM64 镜像。
+
 ## 修补步骤
 
 1. 校验原始 ramdisk 和官方 Magisk APK。
