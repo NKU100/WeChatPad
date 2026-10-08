@@ -1,0 +1,106 @@
+name: Probe hosted LSPosed WeChat smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      module_run_id:
+        description: Successful Build module APK run to reuse
+        type: string
+        default: '37650997867'
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: hosted-lsposed-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Reserve space for Android system and userdata
+        run: |
+          mkdir -p work/hosted-lsp/evidence
+          df -h . | tee work/hosted-lsp/evidence/disk-before.txt
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost
+          df -h . | tee work/hosted-lsp/evidence/disk-after.txt
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+      - name: Reuse module build
+        uses: actions/download-artifact@v8
+        with:
+          name: wechatpad-module-apk
+          path: work/hosted-lsp/module
+          run-id: ${{ inputs.module_run_id }}
+          github-token: ${{ github.token }}
+      - name: Download pinned root and official LSPosed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download experimental-ramdisk-api37.2-r06-magisk31.0 \
+            --pattern ramdisk37-patched.img --pattern LSPosed-v2.2.0-7854-release.zip --dir work/hosted-lsp
+          echo 'b49fec2e291582495196d9437bf520f337882bddf763d2530a576f3e4da99df8  work/hosted-lsp/ramdisk37-patched.img' | sha256sum --check
+          echo '725915707f88a4f5ebecddab908cb217aa0a6d98955db5885bc9fadda81e75b8  work/hosted-lsp/LSPosed-v2.2.0-7854-release.zip' | sha256sum --check
+          mv work/hosted-lsp/LSPosed-v2.2.0-7854-release.zip work/hosted-lsp/lsposed.zip
+          7z e -so work/hosted-lsp/lsposed.zip manager.apk > work/hosted-lsp/manager.apk
+          curl --fail --location --silent --show-error --retry 2 --connect-timeout 20 --max-time 180 \
+            --proto '=https' --proto-redir '=https' https://github.com/topjohnwu/Magisk/releases/download/v31.0/Magisk-v31.0.apk -o work/hosted-lsp/magisk.apk
+          echo '2c8a488b9a5293e578e95ae4f07e3c57aba4feec4a52ca4dd852a2692d6dd4e8  work/hosted-lsp/magisk.apk' | sha256sum --check
+      - name: Download and verify registered official WeChat
+        run: |
+          source_url=$(python3 -c "import json; print(next(p['sourceUrl'] for p in json.load(open('compatibility/targets.json')) if p['identity']['versionName'] == '8.0.79'))")
+          source_sha=$(python3 -c "import json; print(next(p['identity']['apkSha256'] for p in json.load(open('compatibility/targets.json')) if p['identity']['versionName'] == '8.0.79'))")
+          curl --fail --location --silent --show-error --retry 2 --connect-timeout 20 --max-time 300 \
+            --proto '=https' --proto-redir '=https' "$source_url" -o work/hosted-lsp/wechat.apk
+          printf '%s  %s\n' "$source_sha" work/hosted-lsp/wechat.apk | sha256sum --check
+          sdkmanager 'build-tools;37.0.0'
+          "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --print-certs work/hosted-lsp/wechat.apk > work/hosted-lsp/evidence/wechat-signer.txt
+          grep -F '0fe4ff85c215918396dadc7cd8ce6963339af33d37751a56e54c7206b63a3c7c' work/hosted-lsp/evidence/wechat-signer.txt
+      - name: Enable KVM access
+        run: |
+          test -c /dev/kvm
+          sudo chmod 666 /dev/kvm
+      - name: Verify root, official LSPosed and WeChat UI
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: '37.2'
+          emulator-build: '15917651'
+          target: google_apis_ps16k
+          arch: x86_64
+          profile: pixel_5
+          cores: 4
+          ram-size: 4096M
+          disk-size: 6144M
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none -no-snapshot
+          pre-emulator-launch-script: |
+            echo 'a6ee489afea9e28428ceb83d8a0cb55e4ab08cfc755ae2d1f34aff35e1e55038  '"$ANDROID_HOME/system-images/android-37.2/google_apis_ps16k/x86_64/ramdisk.img" | sha256sum --check
+            cp work/hosted-lsp/ramdisk37-patched.img "$ANDROID_HOME/system-images/android-37.2/google_apis_ps16k/x86_64/ramdisk.img"
+          script: |
+            bash scripts/ci/hosted_root_probe.sh
+            python3 scripts/ci/hosted_lsposed_smoke.py
+      - name: Upload runtime evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: hosted-lsposed-smoke
+          path: |
+            work/hosted-lsp/evidence/
+            work/root-probe/evidence/
+          retention-days: 7
+      - name: Summarize runtime smoke
+        if: always()
+        run: |
+          if [[ -f work/hosted-lsp/evidence/summary.md ]]; then
+            cat work/hosted-lsp/evidence/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Smoke failed during environment preparation; see setup logs.' >> "$GITHUB_STEP_SUMMARY"
+          fi
