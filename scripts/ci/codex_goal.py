@@ -51,6 +51,7 @@ class AppServer:
         self.secrets = auth_secrets()
         self.events = deque()
         self.messages = []
+        self.tool_output = {}
         self.sequence = 0
         self.stderr = (directory / 'app-server.stderr.log').open('w')
         self.process = subprocess.Popen(
@@ -78,12 +79,18 @@ class AppServer:
         if 'method' in message and 'id' in message:
             self.send({'id': message['id'], 'error': {'code': -32000, 'message': 'Interactive requests are disabled in CI'}})
             return self.read()
+        if message.get('method') == 'item/commandExecution/outputDelta':
+            params = message.get('params', {})
+            item_id = params.get('itemId', '')
+            self.tool_output[item_id] = (self.tool_output.get(item_id, '') + params.get('delta', ''))[-2000:]
         if message.get('method') == 'item/completed':
             item = message.get('params', {}).get('item', {})
             if item.get('type') == 'agentMessage':
                 self.messages.append(redact(item.get('text', ''), self.secrets + auth_secrets())[:4000])
-            elif item.get('type') == 'commandExecution' and item.get('exitCode') not in {None, 0}:
-                self.messages.append(redact('Tool failure: ' + item.get('aggregatedOutput', '')[-2000:], self.secrets + auth_secrets()))
+            elif item.get('type') == 'commandExecution':
+                output = item.get('aggregatedOutput') or self.tool_output.pop(item.get('id', ''), '')
+                if item.get('exitCode') not in {None, 0}:
+                    self.messages.append(redact('Tool failure: ' + output[-2000:], self.secrets + auth_secrets()))
         return message
 
     def request(self, method, params):

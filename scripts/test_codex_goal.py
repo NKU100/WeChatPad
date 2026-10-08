@@ -1,9 +1,10 @@
 import tempfile
 import json
+import io
 import unittest
 from pathlib import Path
-from unittest.mock import patch
-from scripts.ci.codex_goal import run_goal, redact, write_diagnostics
+from unittest.mock import patch, MagicMock
+from scripts.ci.codex_goal import run_goal, redact, write_diagnostics, AppServer
 
 
 class FakeClient:
@@ -85,6 +86,17 @@ class GoalTest(unittest.TestCase):
             report = json.loads(text)
             self.assertNotIn('secret-value', text)
             self.assertEqual('[REDACTED]', report['iterations'][0]['error'])
+
+    def test_nullable_tool_output_does_not_crash_event_reader(self):
+        client = AppServer.__new__(AppServer)
+        client.secrets = []
+        client.messages = []
+        client.tool_output = {}
+        client.process = MagicMock()
+        client.process.stdout = io.StringIO(json.dumps({'method': 'item/completed', 'params': {'item': {'id': 'tool-1', 'type': 'commandExecution', 'exitCode': 1, 'aggregatedOutput': None}}}) + '\n')
+        with patch('scripts.ci.codex_goal.auth_secrets', return_value=[]):
+            client.read()
+        self.assertEqual(1, len(client.messages))
 
     def test_known_credentials_and_jwt_are_redacted(self):
         jwt = 'eyJhbGciOiJIUzI1NiJ9.abcdefghijklmno.abcdefghijklmno'
