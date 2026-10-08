@@ -89,6 +89,7 @@ class GoalTest(unittest.TestCase):
 
     def test_nullable_tool_output_does_not_crash_event_reader(self):
         client = AppServer.__new__(AppServer)
+        client.trace = MagicMock()
         client.secrets = []
         client.messages = []
         client.tool_output = {}

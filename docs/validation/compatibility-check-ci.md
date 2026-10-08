@@ -62,7 +62,25 @@ gh secret set CODEX_AUTH_WRITE_TOKEN --repo NKU100/WeChatPad
 bash scripts/setup_codex_ci_auth.sh NKU100/WeChatPad
 ```
 
-runner 在模型调用前恢复凭据，Goal 结束后即使模型失败也写回刷新后的文件，删除认证文件，再执行发布前的最终独立验收。写回 token 不传给模型进程。原始模型输出、登录凭据和会话目录不上传 artifact。产物中的 `goal-diagnostics.json` 保留每轮验收结果、Goal 用量、模型最终说明及失败工具摘要；已知认证凭据和常见 Token 格式在写入前过滤。凭据失效或 token 到期需要重新配置；不得通过自动重复适配来尝试修复登录。
+runner 在模型调用前恢复凭据，Goal 结束后即使模型失败也写回刷新后的文件，删除认证文件，再执行发布前的最终独立验收。写回 token 不传给模型进程。登录凭据和会话目录不上传 artifact。产物中的 `goal-diagnostics.json` 保留每轮验收结果、Goal 用量、模型最终说明及失败工具摘要；已知认证凭据和常见 Token 格式在写入前过滤。凭据失效或 token 到期需要重新配置；不得通过自动重复适配来尝试修复登录。
+
+### 加密会话记录
+
+仓库 Actions variable `CODEX_TRACE_RECIPIENT` 配置 age X25519 公钥（`age1…`），私钥只保存在本机，不放入仓库或 Actions。CI 安装 age，在调用模型前验证公钥。缺失、无效的公钥或加密工具故障会阻止模型启动。
+
+控制器完整记录发给 app-server 的请求和收到的响应、通知，包括任务提示、工具调用及成功和失败命令的输出；每条 JSONL 记录包含 UTC 时间、方向和协议消息。记录不截断、不脱敏，直接通过管道送入 age 加密，不生成明文会话文件，也不写入 Actions 控制台或摘要。这里的完整记录指 app-server 对外提供的协议事件，不包含未公开的模型内部内容、认证文件、CLI 会话目录或原始 stderr。
+
+模型成功或失败后，完成加密的 `session.jsonl.age` 和现有诊断文件一起作为 `wechatpad-codex-adaptation` artifact 保存 14 天。加密失败会删除未完成密文；上传清单仅包含完成后的文件。runner 被强制终止时可能没有可恢复的完整记录。任何取得 artifact 的人只能获得密文，runner 在处理事件时仍可接触明文；仅使用可信主分支工作流。
+
+本机安装 age 后，在仓库外用私钥解密，再交给本机 Codex 分析：
+
+```sh
+umask 077
+age --decrypt --identity ~/.config/wechatpad/ci-trace.agekey \
+  --output session.jsonl session.jsonl.age
+```
+
+私钥丢失后无法解密旧记录，应在可信的本地存储中备份。更换公钥只影响后续运行，旧 artifact 仍需原私钥。生成新密钥可用 `age-keygen --output <私钥文件>`，公钥可用 `age-keygen -y <私钥文件>` 提取。
 
 还需在仓库 Actions 设置中开启 **Allow GitHub Actions to create and approve pull requests**。GitHub 将创建与审批放在同一个开关；此流水线只创建 draft PR，不提交审批或合并。draft PR 发布使用权限受限的 `GITHUB_TOKEN`；由该 token 创建的 PR 通常不会自动触发其他 workflow，因此发布后显式手动触发构建 workflow。
 

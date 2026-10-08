@@ -47,19 +47,23 @@ def auth_secrets():
 
 class AppServer:
     def __init__(self, directory, env):
+        from scripts.ci.codex_trace import EncryptedTrace
         self.directory = directory
         self.secrets = auth_secrets()
         self.events = deque()
         self.messages = []
         self.tool_output = {}
         self.sequence = 0
-        self.stderr = (directory / 'app-server.stderr.log').open('w')
-        self.process = subprocess.Popen(
-            ['codex', 'app-server', '--listen', 'stdio://', '-c', 'features.goals=true',
-             '-c', 'features.multi_agent=false', '-c', 'features.multi_agent_v2=false'],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.stderr,
-            text=True, env=env, start_new_session=True)
+        self.trace = EncryptedTrace(directory, os.environ.get('CODEX_TRACE_RECIPIENT', '').strip())
+        self.stderr = None
+        self.process = None
         try:
+            self.stderr = (directory / 'app-server.stderr.log').open('w')
+            self.process = subprocess.Popen(
+                ['codex', 'app-server', '--listen', 'stdio://', '-c', 'features.goals=true',
+                 '-c', 'features.multi_agent=false', '-c', 'features.multi_agent_v2=false'],
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.stderr,
+                text=True, env=env, start_new_session=True)
             self.request('initialize', {'clientInfo': {'name': 'wechatpad_ci', 'version': '1'},
                                         'capabilities': {'experimentalApi': True}})
             self.send({'method': 'initialized'})
@@ -68,6 +72,7 @@ class AppServer:
             raise
 
     def send(self, message):
+        self.trace.record('request', message)
         self.process.stdin.write(json.dumps(message) + '\n')
         self.process.stdin.flush()
 
@@ -76,6 +81,7 @@ class AppServer:
         if not line:
             raise RuntimeError('Codex app-server exited before completing its request')
         message = json.loads(line)
+        self.trace.record('response', message)
         if 'method' in message and 'id' in message:
             self.send({'id': message['id'], 'error': {'code': -32000, 'message': 'Interactive requests are disabled in CI'}})
             return self.read()
@@ -123,14 +129,16 @@ class AppServer:
                 self.wait_turn(thread, turn['id'])
 
     def close(self):
-        if self.process.poll() is None:
+        if self.process is not None and self.process.poll() is None:
             os.killpg(self.process.pid, signal.SIGTERM)
             try:
                 self.process.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 os.killpg(self.process.pid, signal.SIGKILL)
                 self.process.wait()
-        self.stderr.close()
+        if self.stderr is not None:
+            self.stderr.close()
+        self.trace.close()
 
 
 def verify(directory):
