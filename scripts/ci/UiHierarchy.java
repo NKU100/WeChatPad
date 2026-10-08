@@ -37,6 +37,8 @@ public final class UiHierarchy {
     }
 
     public static void main(String[] args) throws Exception {
+        // Android 17's accessibility client creates a handler on the main looper.
+        Looper.prepareMainLooper();
         HandlerThread thread = new HandlerThread("hierarchy");
         thread.start();
         // app_process exposes the platform connection used by the uiautomator command.
