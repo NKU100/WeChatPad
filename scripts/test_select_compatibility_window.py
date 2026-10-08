@@ -4,6 +4,13 @@ from scripts.ci.select_compatibility_window import matrix_entries, select_regres
 
 
 class SelectCompatibilityWindowTest(unittest.TestCase):
+    def test_hosted_verified_profiles_count_toward_the_three_build_window(self):
+        targets = [target("8.0.69", 3040), target("8.0.78", 3180),
+                   target("8.0.79", 3200, "runtime-verified-hosted")]
+        selected = select_regression_targets(targets, candidate_version_code=3220)
+        self.assertEqual(["8.0.78", "8.0.79"], version_names(selected))
+        self.assertLessEqual(len(selected) + 1, 3)
+
     def test_unknown_candidate_uses_only_the_two_newest_supported_predecessors(self):
         targets = [
             target("8.0.69", 3040),

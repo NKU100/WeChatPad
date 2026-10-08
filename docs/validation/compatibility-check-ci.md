@@ -6,7 +6,7 @@
 
 1. 已登记 APK 只允许使用清单中的 HTTPS 腾讯 CDN 地址 `dldir1v6.qq.com/weixin/android/`，并以预期 APK SHA-256 为缓存键。
 2. 最新候选从 `https://weixin.qq.com/` 首页发现。脚本只接受官网列出的腾讯 CDN ARM64 直链，并选择唯一的最高版本；没有候选、多个并列候选或页面结构变化都会失败，不切换到第三方来源。
-3. 候选版本码用于选择最多两个较早的 `runtime-verified-local` profile；候选自身另行检查，因此每轮最多覆盖三个不同版本。
+3. 候选版本码用于选择最多两个较早的 `runtime-verified-local` 或 `runtime-verified-hosted` profile；候选自身另行检查，因此每轮最多覆盖三个不同版本。
 4. 候选 APK 以官方直链 SHA-256 定位缓存，文件按实际 SHA-256 命名。缓存命中时会核对官网的 `Last-Modified`、`Content-Length`、APK 摘要和已登记摘要；信息缺失或变化时重新下载。
 5. `compat-checker` 调用 Android 模块共用的 `compat-core`。正式 profile 解析与未知候选分析共用 `HookMethodMatcher` 对锚点、参数/返回形状和唯一性的判断；未知版本使用最近的较早正式 profile，正式版本还要求方法描述符与登记值完全一致。
 6. 未知版本只有在基线中所有 Hook 都标记 `safeForForwardInference: true` 且每个 Hook 唯一匹配时，才会生成候选 profile 建议。未标记、缺失、形状变化或多重命中都会进入 `NEEDS_HOOK_REVIEW`，不会猜测 Hook 目标。
@@ -27,7 +27,7 @@
 
 模型在隔离 checkout 中检查真实 APK，可使用 jadx。控制器拒绝修改既有 profile、检查器、脚本、工作流和构建配置。新增 profile 必须使用已校验的身份和来源，状态只能为 `static-verified`。候选和最多两个较早正式支持版本分别经过共用检查器；核心测试、模块测试和 debug APK 构建通过后才发布 draft PR，并把 Issue 状态更新为 `WAITING_RUNTIME`。模型失败或静态检查失败时，Issue 和结果报告停留在 `NEEDS_HOOK_REVIEW`。
 
-PR 分支包含可用于本地 AVD 冒烟的静态适配。完成登录界面冒烟后在 PR 中记录结果，将 profile 更新为 `runtime-verified-local`，审阅合入主分支后再由兼容检测确认 `FORMALLY_SUPPORTED`。
+PR 分支包含静态适配。流水线随后自动执行托管 AVD 登录界面冒烟，通过后记录结果并将候选更新为 `runtime-verified-hosted`；审阅合入主分支后再由兼容检测确认 `FORMALLY_SUPPORTED`。本地 AVD 可用于失败诊断或补充验证。
 
 ## 订阅认证配置
 

@@ -685,6 +685,8 @@ jobs:
 
   runtime-result:
     name: Record runtime acceptance
+    outputs:
+      pipeline_status: ${{ steps.record.outputs.pipeline_status }}
     needs: [adapt, runtime]
     if: always() && needs.adapt.outputs.pr_url != ''
     runs-on: ubuntu-latest

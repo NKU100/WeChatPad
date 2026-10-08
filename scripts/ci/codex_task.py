@@ -26,7 +26,7 @@ def issue_body(report, status, run_url, pr_url=""):
              f"Source: {report['sourceUrl']}", f"Run: {run_url}", "",
              "Model: `gpt-6-luna`; reasoning: `xhigh`; one adaptation attempt."]
     if pr_url:
-        lines.extend(["", f"Draft PR: {pr_url}", "Hosted login-screen runtime evidence and merge are required before formal support."])
+        lines.extend(["", f"Adaptation PR: {pr_url}", "Hosted login-screen runtime evidence and merge are required before formal support."])
     else:
         lines.extend(["", "This build is claimed once. A failure or timeout is not retried automatically."])
     return "\n".join(lines) + "\n"

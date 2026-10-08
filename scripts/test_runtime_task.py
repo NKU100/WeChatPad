@@ -81,6 +81,20 @@ class RuntimeTaskTest(unittest.TestCase):
             self.assertEqual(git('diff', '--name-only', head, 'FETCH_HEAD'), 'compatibility/targets.json')
             self.assertEqual(git('rev-parse', 'FETCH_HEAD^'), head)
 
+    def test_changed_pr_head_cannot_be_promoted(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / 'candidate-report.json').write_text(json.dumps(self.report))
+            (root / 'smoke.json').write_text(json.dumps(self.smoke))
+            pr = {'headRefOid': 'changed', 'headRefName': 'adapt/test', 'state': 'OPEN', 'body': ''}
+            env = {'GITHUB_REPOSITORY': 'owner/repo', 'GITHUB_RUN_ID': '1'}
+            with patch.dict(os.environ, env), patch('sys.argv', ['runtime_task', '--directory', str(root),
+                      '--smoke', str(root / 'smoke.json'), '--conclusion', 'success', '--pr', '1',
+                      '--head', 'tested', '--issue', '2']), patch('scripts.ci.runtime_task.gh', return_value=json.dumps(pr)), patch('scripts.ci.runtime_task.subprocess.run') as git:
+                with self.assertRaisesRegex(ValueError, 'changed or closed'):
+                    main()
+                git.assert_not_called()
+
     def test_requires_static_verification(self):
         self.report['status'] = 'NEEDS_HOOK_REVIEW'
         with self.assertRaises(ValueError):
