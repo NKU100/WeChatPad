@@ -57,10 +57,10 @@ def model_command(directory, env, command):
         (tools / 'bin').mkdir(parents=True, exist_ok=True)
         wrapper = tools / 'bin/adb'
         shutil.copyfile(Path(__file__).with_name('adb-device.sh'), wrapper)
+        shutil.copyfile(Path(__file__).with_name('adb_relay_client.py'), tools / 'bin/adb_relay_client.py')
         wrapper.chmod(0o755)
         bind(tools)
         env['PATH'] = str(tools / 'bin') + ':' + env['PATH']
-        env['WECHATPAD_ADB_SOCKET'] = state['runtime']['socket']
-        env['WECHATPAD_ADB_SERIAL'] = state['runtime']['serial']
+        env['WECHATPAD_ADB_RELAY'] = str(workspace / 'work/analysis/adb-relay')
     args += ['--chdir', str(workspace), '--', *command]
     return args

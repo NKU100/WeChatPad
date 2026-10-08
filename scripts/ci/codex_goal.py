@@ -57,7 +57,12 @@ class AppServer:
         self.trace = EncryptedTrace(directory, os.environ.get('CODEX_TRACE_RECIPIENT', '').strip())
         self.stderr = None
         self.process = None
+        self.device_relay = None
         try:
+            state = json.loads((directory / 'state.json').read_text())
+            if state.get('runtime'):
+                from scripts.ci.adb_relay import DeviceRelay
+                self.device_relay = DeviceRelay(directory, env)
             self.stderr = (directory / 'app-server.stderr.log').open('w')
             from scripts.ci.codex_sandbox import model_command
             command = model_command(directory, env,
@@ -144,6 +149,8 @@ class AppServer:
                 self.process.wait()
         if self.stderr is not None:
             self.stderr.close()
+        if self.device_relay is not None:
+            self.device_relay.close()
         self.trace.close()
 
 

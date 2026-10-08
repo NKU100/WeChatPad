@@ -48,7 +48,7 @@ jobs:
         run: python3 -m unittest scripts.test_select_compatibility_window
 
       - name: Test Codex eligibility, edit guards, timeout, and deduplication
-        run: python3 -m unittest scripts.test_codex_adaptation scripts.test_codex_task scripts.test_codex_goal
+        run: python3 -m unittest scripts.test_codex_adaptation scripts.test_codex_task scripts.test_codex_goal scripts.test_adb_device scripts.test_runtime_adaptation
 
       - name: Validate target manifest
         id: validate
