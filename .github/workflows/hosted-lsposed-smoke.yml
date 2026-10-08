@@ -80,7 +80,8 @@ jobs:
           cores: 4
           ram-size: 4096M
           disk-size: 6144M
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none -no-snapshot
+          # The API 37 gralloc mapper requires color-buffer DMA for CPU readback.
+          emulator-options: -no-window -gpu swiftshader_indirect -feature GLDirectMem,HasSharedSlotsHostMemoryAllocator -noaudio -no-boot-anim -camera-back none -camera-front none -no-snapshot
           pre-emulator-launch-script: |
             echo 'a6ee489afea9e28428ceb83d8a0cb55e4ab08cfc755ae2d1f34aff35e1e55038  '"$ANDROID_HOME/system-images/android-37.2/google_apis_ps16k/x86_64/ramdisk.img" | sha256sum --check
             cp work/hosted-lsp/ramdisk37-patched.img "$ANDROID_HOME/system-images/android-37.2/google_apis_ps16k/x86_64/ramdisk.img"
