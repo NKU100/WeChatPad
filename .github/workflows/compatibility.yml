@@ -544,6 +544,20 @@ jobs:
         with:
           node-version: '24'
 
+      - name: Prepare Linux sandbox prerequisites
+        if: steps.claim.outputs.claimed == 'true'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y bubblewrap apparmor-profiles apparmor-utils
+          if [[ ! -f /etc/apparmor.d/bwrap-userns-restrict && -f /usr/share/apparmor/extra-profiles/bwrap-userns-restrict ]]; then
+            sudo install -m 0644 /usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/bwrap-userns-restrict
+          fi
+          if [[ -f /etc/apparmor.d/bwrap-userns-restrict ]]; then
+            sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
+          fi
+          command -v bwrap
+          bwrap --version
+
       - name: Install pinned Codex CLI and jadx
         if: steps.claim.outputs.claimed == 'true'
         run: |

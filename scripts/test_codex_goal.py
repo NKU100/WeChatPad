@@ -13,6 +13,8 @@ class FakeClient:
         self.turn = 0
     def request(self, method, params):
         self.calls.append((method, params))
+        if method == 'command/exec':
+            return {'exitCode': 0, 'stdout': 'sandbox ready', 'stderr': ''}
         if method == 'thread/start':
             return {'thread': {'id': 'thread-1'}}
         if method == 'turn/start':
@@ -51,6 +53,19 @@ class GoalTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'budgetLimited'):
                 run_goal(client, Path(root), 'adapt', 10000)
         self.assertEqual(1, client.turn)
+
+    def test_sandbox_failure_stops_before_creating_goal_or_spending_tokens(self):
+        client = FakeClient()
+        def request(method, params):
+            client.calls.append((method, params))
+            if method == 'command/exec':
+                return {'exitCode': 1, 'stderr': 'bwrap: loopback: Operation not permitted'}
+            self.fail('A failed sandbox must stop before creating a thread')
+        client.request = request
+        with tempfile.TemporaryDirectory() as root:
+            with self.assertRaisesRegex(RuntimeError, 'Sandbox preflight failed'):
+                run_goal(client, Path(root), 'adapt', 10000)
+        self.assertEqual(0, client.turn)
 
     def test_failed_turn_is_not_verified_or_retried(self):
         client = FakeClient()

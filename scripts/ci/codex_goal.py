@@ -151,6 +151,13 @@ def verification_error(directory, error):
 def run_goal(client, directory, prompt, token_budget):
     if type(token_budget) is not int or token_budget <= 0:
         raise ValueError('Goal token budget must be a positive integer')
+    workspace = directory / 'checkout'
+    preflight = client.request('command/exec', {
+        'command': ['python3', '-c', "from pathlib import Path; import tempfile; assert Path('work/apks/candidate.apk').is_file(); assert Path('work/analysis/candidate-report.json').is_file(); f=tempfile.TemporaryFile(dir='.'); f.write(b'probe'); f.close(); print('sandbox ready')"],
+        'cwd': str(workspace), 'timeoutMs': 10000,
+        'sandboxPolicy': {'type': 'workspaceWrite', 'writableRoots': [str(workspace)], 'networkAccess': False}})
+    if preflight.get('exitCode') != 0:
+        raise RuntimeError('Sandbox preflight failed before model invocation: ' + str(preflight.get('stderr', ''))[:2000])
     from scripts.ci.codex_adaptation import MODEL, REASONING
     thread = client.request('thread/start', {'cwd': str(directory / 'checkout'), 'model': MODEL,
         'approvalPolicy': 'never', 'sandbox': 'workspace-write', 'ephemeral': False,
