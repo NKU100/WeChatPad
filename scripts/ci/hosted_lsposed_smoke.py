@@ -145,6 +145,7 @@ def mobile_input(label):
             ready = 0
             node = unique_node(ui, lambda n: n.get('text', '').strip().lower() in (
                 'log in', 'login', 'log in via mobile number', 'log in with phone number',
+                'log in on tablet only',
                 'agree', 'accept', 'allow', 'while using the app', '登录', '手机号登录', '同意'))
             if node is not None:
                 tap(node)

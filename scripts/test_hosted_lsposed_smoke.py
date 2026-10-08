@@ -62,6 +62,14 @@ class UiEvidenceTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'ambiguous'):
             smoke.ocr_target(tsv + line + line.replace('5\t1\t1\t1\t1\t1', '5\t1\t2\t1\t1\t1'), 'WeChatPad')
 
+    def test_tablet_only_selector_is_navigation_not_final_success(self):
+        ui = '<hierarchy><node package="com.tencent.mm" text="Log in on Tablet Only" bounds="[0,0][100,100]" /></hierarchy>'
+        mobile = '<hierarchy><node package="com.tencent.mm" text="Mobile Number" /></hierarchy>'
+        observations = [('LoginSelectUI', ui), ('MobileInputUI', mobile), ('MobileInputUI', mobile), ('MobileInputUI', mobile)]
+        with patch.object(smoke, 'enable_page_size_backcompat'), patch.object(smoke, 'adb'), patch.object(smoke, 'snapshot', side_effect=observations), patch.object(smoke, 'tap') as click, patch.object(smoke.time, 'sleep'):
+            self.assertEqual(smoke.mobile_input('module'), mobile)
+            self.assertEqual(click.call_count, 1)
+
     def test_launcher_is_not_wechat(self):
         self.assertFalse(smoke.has_wechat_ui('<hierarchy><node package="com.google.android.apps.nexuslauncher" /></hierarchy>'))
 
@@ -70,6 +78,7 @@ class UiEvidenceTest(unittest.TestCase):
 
     def test_tablet_entry_requires_explicit_login_choice(self):
         self.assertFalse(smoke.is_tablet_entry('Use a tablet to read more'))
+        self.assertFalse(smoke.is_tablet_entry('Log in on Tablet Only'))
         self.assertTrue(smoke.is_tablet_entry('Logged in on Phone & Tablet'))
 
     def test_qr_requires_activity_and_rendered_wechat_instructions(self):
