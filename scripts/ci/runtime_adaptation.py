@@ -51,7 +51,7 @@ def initialize(directory, root, serial):
     state_path.write_text(json.dumps(state, indent=2))
     (workspace / 'work/analysis/runtime-device.json').write_text(json.dumps({
         'serial': serial, 'baseline': 'NO_TABLET_ENTRY',
-        'instructions': 'Use adb device commands to inspect this disposable AVD. Screenshots and logs can be saved under work/analysis. Independent runtime verification runs after every completed turn.'}, indent=2))
+        'instructions': 'Run adb wechat-launch to restore 16 KB compatibility and start WeChat. After adding the profile, run wechatpad-build for guarded host checks/tests/build; do not retry Gradle inside the network-disabled sandbox. Build logs are under work/analysis/host-build. Use adb device commands to inspect the disposable AVD. Interrupted requests are cancelled by the relay. Independent runtime verification runs after every completed turn.'}, indent=2))
 
 
 def verify_runtime(directory):

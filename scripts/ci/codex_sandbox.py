@@ -61,6 +61,9 @@ def model_command(directory, env, command):
         shutil.copyfile(Path(__file__).with_name('adb-device.sh'), wrapper)
         shutil.copyfile(Path(__file__).with_name('adb_relay_client.py'), tools / 'bin/adb_relay_client.py')
         wrapper.chmod(0o755)
+        builder = tools / 'bin/wechatpad-build'
+        shutil.copyfile(Path(__file__).with_name('host-build.sh'), builder)
+        builder.chmod(0o755)
         bind(tools)
         env['PATH'] = str(tools / 'bin') + ':' + env['PATH']
         env['WECHATPAD_ADB_RELAY'] = str(workspace / 'work/analysis/adb-relay')

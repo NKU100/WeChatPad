@@ -137,6 +137,7 @@ jobs:
             javac --release 17 -cp "$ANDROID_HOME/platforms/android-37.2/android.jar" -d work/runtime-smoke/ui-classes scripts/ci/UiHierarchy.java
             "$ANDROID_HOME/build-tools/37.0.0/d8" --min-api 37 --lib "$ANDROID_HOME/platforms/android-37.2/android.jar" --output work/runtime-smoke/ui-hierarchy.jar work/runtime-smoke/ui-classes/UiHierarchy.class
             python3 scripts/ci/runtime_smoke.py
+            python3 scripts/ci/runtime_tooling_probe.py
       - name: Upload runtime evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -144,6 +145,7 @@ jobs:
           name: wechatpad-runtime-smoke
           path: |
             work/runtime-smoke/evidence/
+            work/runtime-smoke/tooling/tooling-report.json
             work/root-verification/evidence/
           retention-days: 7
       - name: Summarize runtime smoke

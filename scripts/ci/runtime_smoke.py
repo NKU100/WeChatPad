@@ -15,6 +15,7 @@ import zipfile
 ROOT = Path('work/runtime-smoke')
 EVIDENCE = ROOT / 'evidence'
 MAGISK = '/debug_ramdisk/magisk'
+PAGE_SIZE_BACKCOMPAT_COMMAND = 'setprop bionic.linker.16kb.app_compat.enabled true; setprop pm.16kb.app_compat.disabled false'
 WECHAT = 'com.tencent.mm'
 MODULE = 'io.github.nku100.wechatpad'
 stage = 'START'
@@ -127,7 +128,7 @@ def tap(node):
 
 def enable_page_size_backcompat():
     # Recovery libraries unpacked at runtime can still have 4 KB ELF alignment.
-    su('setprop bionic.linker.16kb.app_compat.enabled true; setprop pm.16kb.app_compat.disabled false')
+    su(PAGE_SIZE_BACKCOMPAT_COMMAND)
 
 
 def mobile_input(label):

@@ -4,6 +4,8 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+import time
+from unittest.mock import patch, MagicMock
 from scripts.ci.adb_relay import DeviceRelay, validate_request
 
 
@@ -63,6 +65,52 @@ class AdbDeviceTest(unittest.TestCase):
             self.assertEqual(7, result.returncode)
             self.assertEqual(bytes([0,255,10]), result.stdout)
             self.assertEqual(b'device error', result.stderr)
+
+    def test_cancelled_client_releases_device_queue(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            tools = root / 'platform-tools'; tools.mkdir()
+            adb = tools / 'adb'
+            adb.write_text('#!/usr/bin/env python3\nimport sys,time,pathlib\nif "hang" in sys.argv:\n pathlib.Path("started").touch()\n time.sleep(30)\nelse: print("device")\n')
+            adb.chmod(0o755)
+            (root / 'state.json').write_text(json.dumps({'worktree': str(root), 'runtime': {'socket': str(root / 'adb.sock'), 'serial': 'emulator-5554'}}))
+            env = dict(os.environ, ANDROID_HOME=str(root))
+            relay = DeviceRelay(root, env)
+            env['WECHATPAD_ADB_RELAY'] = str(relay.root)
+            wrapper = str(Path('scripts/ci/adb-device.sh').resolve())
+            client = subprocess.Popen(['bash', wrapper, 'shell', 'hang'], cwd=root, env=env)
+            try:
+                deadline = time.monotonic() + 5
+                while not (root / 'started').exists() and time.monotonic() < deadline:
+                    time.sleep(0.02)
+                self.assertTrue((root / 'started').exists())
+                client.terminate(); client.wait(timeout=3)
+                started = time.monotonic()
+                result = subprocess.check_output(['bash', wrapper, 'get-state'], cwd=root, env=env, timeout=3)
+                self.assertEqual(b'device\n', result)
+                self.assertLess(time.monotonic() - started, 3)
+            finally:
+                if client.poll() is None: client.kill(); client.wait()
+                relay.close()
+
+    def test_managed_launch_restores_compatibility_before_starting_wechat(self):
+        relay = DeviceRelay.__new__(DeviceRelay)
+        relay.adb = '/sdk/adb'; relay.serial = 'emulator-5554'
+        with patch.object(relay, 'execute', return_value=(0,b'',b'')) as execute:
+            relay.dispatch(['wechat-launch'], Path('/workspace'), 'request')
+        calls = [c.args[0] for c in execute.call_args_list]
+        self.assertEqual('wait-for-device', calls[0][-1])
+        self.assertIn('bionic.linker.16kb.app_compat.enabled true', calls[1][-1])
+        self.assertIn('/debug_ramdisk/magisk', calls[1][-1])
+        self.assertEqual(['shell','am','force-stop','com.tencent.mm'], calls[2][3:])
+        self.assertEqual('monkey', calls[3][4])
+
+    def test_managed_build_and_launch_do_not_accept_arbitrary_arguments(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            for args in [['verify-build','--task','exec'], ['wechat-launch','other.package']]:
+                with self.assertRaises(ValueError):
+                    validate_request({'args':args,'cwd':str(root)},root)
 
 
 if __name__ == '__main__':

@@ -18,7 +18,16 @@ it. Do not weaken matching just to make a check pass.
 Existing regression tests must remain unchanged; add new tests when necessary.
 
 When work/analysis/runtime-device.json exists, a disposable rooted AVD is ready
-with the exact candidate APK and official LSPosed. Use `adb shell`, `adb logcat`,
+with the exact candidate APK and official LSPosed.
+Run `adb wechat-launch` after install, clear, or reboot; it restores the 16 KB
+compatibility settings and launches the exact candidate. Run `wechatpad-build`
+after adding a candidate profile to request the guarded host static checks,
+regressions, tests and APK build. Read its logs under work/analysis/host-build.
+Gradle uses sockets even offline; do not retry Gradle inside the network-disabled
+sandbox. The managed build accepts no arbitrary tasks or arguments. It does not
+replace the controller's final static and runtime verification. Device commands
+have bounded timeouts; stop an unwanted command before issuing another one.
+Use `adb shell`, `adb logcat`,
 `adb install`, `adb pull` and `adb exec-out screencap -p` to inspect and debug it.
 The adb launcher fixes the device and server: do not pass -s/-H/-P/-L or bypass
 it. Save screenshots and UI evidence under work/analysis. You may install your

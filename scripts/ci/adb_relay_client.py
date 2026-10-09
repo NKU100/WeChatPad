@@ -3,18 +3,22 @@ import json
 import os
 from pathlib import Path
 import sys
+import signal
 import time
 import uuid
 
 
 def main():
+    def interrupted(number, frame):
+        raise KeyboardInterrupt
+    signal.signal(signal.SIGTERM, interrupted)
     root = Path(os.environ['WECHATPAD_ADB_RELAY'])
     key = uuid.uuid4().hex
     temporary = root / (key + '.tmp')
-    temporary.write_text(json.dumps({'args': sys.argv[1:], 'cwd': os.getcwd()}))
-    temporary.replace(root / (key + '.request'))
-    deadline = time.monotonic() + 300
     try:
+        temporary.write_text(json.dumps({'args': sys.argv[1:], 'cwd': os.getcwd()}))
+        temporary.replace(root / (key + '.request'))
+        deadline = time.monotonic() + (960 if sys.argv[1:] == ['verify-build'] else 300)
         while time.monotonic() < deadline:
             result = root / (key + '.result')
             if result.exists():
@@ -29,6 +33,8 @@ def main():
             time.sleep(0.05)
         print('Dedicated ADB relay timed out', file=sys.stderr)
         return 124
+    except KeyboardInterrupt:
+        return 130
     finally:
         for suffix in ['tmp', 'request', 'result', 'stdout', 'stderr']:
             (root / (key + '.' + suffix)).unlink(missing_ok=True)

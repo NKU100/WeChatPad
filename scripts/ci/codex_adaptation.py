@@ -86,6 +86,11 @@ def run_bounded(command, cwd, env, log, timeout=None):
             os.killpg(process.pid, signal.SIGKILL)
             process.wait()
             raise TimeoutError(f"Command exceeded its {timeout}-second execution limit") from None
+        except BaseException:
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait()
+            raise
     if result:
         raise RuntimeError(f"Command failed with exit code {result}; raw output is retained only on the runner")
 

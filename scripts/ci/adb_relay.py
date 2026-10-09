@@ -4,9 +4,13 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import signal
+import shlex
+import sys
 import threading
+import time
 
-COMMANDS = {'shell', 'exec-out', 'push', 'pull', 'install', 'uninstall', 'logcat',
+COMMANDS = {'wechat-launch', 'verify-build', 'shell', 'exec-out', 'push', 'pull', 'install', 'uninstall', 'logcat',
             'reboot', 'root', 'unroot', 'wait-for-device', 'get-state', 'version', 'help'}
 
 
@@ -19,6 +23,8 @@ def validate_request(request, workspace):
     cwd = Path(request['cwd']).resolve()
     if not cwd.is_relative_to(workspace):
         raise ValueError('Device command must run inside the adaptation workspace')
+    if args[0] in {'wechat-launch', 'verify-build'} and len(args) != 1:
+        raise ValueError('Managed launch/build commands do not accept arguments')
     def local_path(value):
         if not (cwd / value).resolve().is_relative_to(workspace):
             raise ValueError('ADB local files must stay inside the adaptation workspace')
@@ -43,6 +49,7 @@ def validate_request(request, workspace):
 class DeviceRelay:
     def __init__(self, directory, env):
         state = json.loads((directory / 'state.json').read_text())
+        self.directory = directory.resolve()
         self.workspace = Path(state['worktree']).resolve()
         self.root = self.workspace / 'work/analysis/adb-relay'
         self.root.mkdir(parents=True, exist_ok=True)
@@ -62,6 +69,61 @@ class DeviceRelay:
         with os.fdopen(fd, 'wb') as stream:
             stream.write(data)
 
+    def execute(self, command, cwd, request, timeout):
+        with self.process_lock:
+            if self.stop.is_set():
+                raise InterruptedError('Runtime relay stopped')
+            self.process = subprocess.Popen(command, cwd=cwd, env=self.env,
+                                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                            start_new_session=True)
+        deadline = time.monotonic() + timeout
+        try:
+            while True:
+                try:
+                    os.stat(request, dir_fd=self.fd, follow_symlinks=False)
+                    cancelled = self.stop.is_set()
+                except FileNotFoundError:
+                    cancelled = True
+                if cancelled or time.monotonic() >= deadline:
+                    try:
+                        os.killpg(self.process.pid, signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+                    try:
+                        stdout, stderr = self.process.communicate(timeout=3)
+                    except subprocess.TimeoutExpired:
+                        os.killpg(self.process.pid, signal.SIGKILL)
+                        stdout, stderr = self.process.communicate()
+                    reason = 'Managed request cancelled' if cancelled else f'Managed command exceeded {timeout} seconds'
+                    return (130 if cancelled else 124), stdout, stderr + ('\n' + reason + '\n').encode()
+                try:
+                    stdout, stderr = self.process.communicate(timeout=0.1)
+                    return self.process.returncode, stdout, stderr
+                except subprocess.TimeoutExpired:
+                    pass
+        finally:
+            with self.process_lock:
+                self.process = None
+
+    def dispatch(self, args, cwd, request):
+        if args[0] == 'verify-build':
+            return self.execute([sys.executable, str(Path(__file__).with_name('host_build.py')),
+                                 str(self.directory)], cwd, request, 900)
+        prefix = [self.adb, '-s', self.serial]
+        if args[0] == 'wechat-launch':
+            from scripts.ci.runtime_smoke import MAGISK, PAGE_SIZE_BACKCOMPAT_COMMAND
+            commands = [prefix + ['wait-for-device'],
+                        prefix + ['shell', shlex.join([MAGISK, 'su', '-c', PAGE_SIZE_BACKCOMPAT_COMMAND])],
+                        prefix + ['shell', 'am', 'force-stop', 'com.tencent.mm'],
+                        prefix + ['shell', 'monkey', '-p', 'com.tencent.mm', '-c', 'android.intent.category.LAUNCHER', '1']]
+            for command in commands:
+                result = self.execute(command, cwd, request, 60)
+                if result[0]:
+                    return result
+            return result
+        timeout = 240 if args[0] == 'install' else 120 if args[0] in {'push', 'pull', 'wait-for-device'} else 30
+        return self.execute(prefix + args, cwd, request, timeout)
+
     def serve(self):
         while not self.stop.is_set():
             for name in os.listdir(self.fd):
@@ -73,21 +135,9 @@ class DeviceRelay:
                     with os.fdopen(fd, 'rb') as stream:
                         request = json.loads(stream.read(65536))
                     args, cwd = validate_request(request, self.workspace)
-                    with self.process_lock:
-                        if self.stop.is_set():
-                            return
-                        self.process = subprocess.Popen([self.adb, '-s', self.serial, *args], cwd=cwd,
-                                                        env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                    try:
-                        stdout, stderr = self.process.communicate(timeout=120)
-                        code = self.process.returncode
-                    except subprocess.TimeoutExpired:
-                        self.process.kill()
-                        stdout, stderr = self.process.communicate()
-                        code, stderr = 124, stderr + b'\nDevice command exceeded 120 seconds\n'
-                    finally:
-                        with self.process_lock:
-                            self.process = None
+                    code, stdout, stderr = self.dispatch(args, cwd, name)
+                except FileNotFoundError:
+                    continue
                 except Exception as error:
                     code, stdout, stderr = 2, b'', (str(error) + '\n').encode()
                 try:
@@ -103,6 +153,9 @@ class DeviceRelay:
         self.stop.set()
         with self.process_lock:
             if self.process is not None:
-                self.process.kill()
+                try:
+                    os.killpg(self.process.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
         self.thread.join(timeout=5)
         os.close(self.fd)
