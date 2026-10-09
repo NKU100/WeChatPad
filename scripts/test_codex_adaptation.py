@@ -18,7 +18,7 @@ class CodexAdaptationTest(unittest.TestCase):
         self.profile = copy.deepcopy(self.targets[-1])
         self.profile.update(identity=self.identity, sourceUrl=self.report['sourceUrl'], verificationStatus='static-verified')
 
-    def test_preparation_excludes_history_reports_and_inferred_answers(self):
+    def test_preparation_preserves_repository_context_in_an_independent_checkout(self):
         from scripts.ci.codex_adaptation import prepare, git
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -34,10 +34,15 @@ class CodexAdaptationTest(unittest.TestCase):
             targets = repository / 'compatibility/targets.json'
             targets.parent.mkdir()
             targets.write_text(json.dumps(self.targets))
-            (repository / 'old-answer.md').write_text('secret answer')
+            (repository / 'old-answer.md').write_text('historical adaptation')
             subprocess.run(['git', 'add', '.'], cwd=repository, check=True)
             subprocess.run(['git', '-c', 'user.name=Test', '-c', 'user.email=test@localhost',
                             'commit', '-qm', 'Old answer'], cwd=repository, check=True)
+            (repository / 'old-answer.md').write_text('current adaptation')
+            subprocess.run(['git', 'add', 'old-answer.md'], cwd=repository, check=True)
+            subprocess.run(['git', '-c', 'user.name=Test', '-c', 'user.email=test@localhost',
+                            'commit', '-qm', 'Update context'], cwd=repository, check=True)
+            (repository / 'controller-state.json').write_text('untracked controller state')
             apk = root / 'candidate.apk'
             apk.write_bytes(b'candidate')
             report = dict(self.report, identity=dict(self.identity, apkSha256=sha256(apk)),
@@ -48,15 +53,20 @@ class CodexAdaptationTest(unittest.TestCase):
             with patch('scripts.ci.codex_adaptation.select_regression_targets', return_value=[]):
                 prepare(repository, report_path, apk, task)
             checkout = task / 'checkout'
-            self.assertFalse((checkout / 'old-answer.md').exists())
-            self.assertEqual('1', git(checkout, 'rev-list', '--count', 'HEAD'))
+            self.assertEqual('current adaptation', (checkout / 'old-answer.md').read_text())
+            self.assertEqual('historical adaptation', git(checkout, 'show', 'HEAD~1:old-answer.md'))
+            self.assertEqual('2', git(checkout, 'rev-list', '--count', 'HEAD'))
+            self.assertFalse((checkout / 'controller-state.json').exists())
+            self.assertFalse((checkout / '.git/objects/info/alternates').exists())
+            (checkout / 'old-answer.md').write_text('agent changes')
+            self.assertEqual('current adaptation', (repository / 'old-answer.md').read_text())
             self.assertEqual('', git(checkout, 'remote'))
             supplied = json.loads((checkout / 'work/analysis/candidate-report.json').read_text())
-            self.assertEqual({'identity', 'sourceUrl', 'status'}, set(supplied))
+            self.assertEqual(report, supplied)
             state = json.loads((task / 'state.json').read_text())
             self.assertEqual(git(repository, 'rev-parse', 'HEAD'), state['base'])
             self.assertEqual(git(checkout, 'rev-parse', 'HEAD'), state['agent_base'])
-            self.assertNotEqual(state['base'], state['agent_base'])
+            self.assertEqual(state['base'], state['agent_base'])
 
     def test_unknown_verified_candidate_can_run_even_when_static_inference_passed(self):
         self.assertTrue(eligible_candidate(self.report, self.targets))

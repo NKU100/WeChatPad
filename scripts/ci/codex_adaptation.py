@@ -6,8 +6,6 @@ import json
 import os
 import re
 import signal
-import tarfile
-import tempfile
 import subprocess
 from pathlib import Path
 
@@ -123,25 +121,10 @@ def prepare(repository, report_path, candidate_apk, directory):
     directory.mkdir(parents=True, exist_ok=True)
     worktree = directory / "checkout"
     base = git(repository, "rev-parse", "HEAD")
-    # Export only build inputs; the model must not inherit repository history or reports.
-    worktree.mkdir()
-    paths = [".gitignore", "gradlew", "gradlew.bat", "gradle", "gradle.properties",
-             "build.gradle.kts", "settings.gradle.kts", "app", "compat-core",
-             "compat-checker", "compatibility/targets.json"]
-    with tempfile.TemporaryFile() as archive:
-        subprocess.run(["git", "archive", base, "--", *paths], cwd=repository, stdout=archive, check=True)
-        archive.seek(0)
-        with tarfile.open(fileobj=archive) as source:
-            members = source.getmembers()
-            if any(not (member.isfile() or member.isdir())
-                   or member.name.startswith("/") or ".." in Path(member.name).parts
-                   for member in members):
-                raise ValueError("Build input archive must contain only regular files and directories")
-            source.extractall(worktree, members=members)
-    subprocess.run(["git", "init", "--quiet", str(worktree)], check=True)
-    subprocess.run(["git", "add", "."], cwd=worktree, check=True)
-    subprocess.run(["git", "-c", "user.name=CI", "-c", "user.email=ci@localhost",
-                    "commit", "--quiet", "-m", "Build inputs"], cwd=worktree, check=True)
+    subprocess.run(["git", "clone", "--quiet", "--no-local", "--no-checkout",
+                    str(repository.resolve()), str(worktree)], check=True)
+    subprocess.run(["git", "remote", "remove", "origin"], cwd=worktree, check=True)
+    subprocess.run(["git", "checkout", "--quiet", "--detach", base], cwd=worktree, check=True)
     agent_base = git(worktree, "rev-parse", "HEAD")
     apk_dir = worktree / "work/apks"
     apk_dir.mkdir(parents=True)
@@ -157,9 +140,7 @@ def prepare(repository, report_path, candidate_apk, directory):
         apks.append((identity["versionName"], str(destination.relative_to(worktree))))
     analysis = worktree / "work/analysis"
     analysis.mkdir(parents=True)
-    (analysis / "candidate-report.json").write_text(json.dumps({
-        "identity": report["identity"], "sourceUrl": report["sourceUrl"],
-        "status": "UNKNOWN_BUILD"}, indent=2))
+    (analysis / "candidate-report.json").write_text(json.dumps(report, indent=2))
     existing_tests = {str(path.relative_to(worktree)): sha256(path)
                       for module in ["app", "compat-core"]
                       for path in (worktree / module / "src/test").rglob("*") if path.is_file()}

@@ -50,9 +50,10 @@ compat-core/src/main/kotlin, and their existing test directories. Do not modify
 the checker executable, workflow, scripts, build configuration, credentials,
 or historical verification records. Leave all changes uncommitted.
 
-Derive the Hook logic from the supplied APKs. Do not search for answers in other
-workspaces, Git history, previous runs, or online sources. Cite the inspected
-method bodies in your final explanation.
+Choose the context you need, including repository documentation, Git history,
+existing adaptations and candidate analysis. Confirm the Hook logic against the
+actual candidate APK and runtime behavior. Cite the inspected method bodies in
+your final explanation.
 
 Use this single agent only. Do not spawn subagents, launch another Codex process,
 change model or reasoning settings, log in, read credentials, push, or create PRs.
