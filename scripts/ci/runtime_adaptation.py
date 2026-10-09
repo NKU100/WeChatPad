@@ -85,7 +85,14 @@ def verify_runtime(directory):
     report['moduleApkSha256'] = sha256(apk)
     (directory / 'runtime-report.json').write_text(json.dumps(report, indent=2) + '\n')
     if result:
+        diagnostic = report.get('runtimeDiagnostics', {})
+        summary = {key: diagnostic.get(key, 'NOT_OBSERVED')
+                   for key in ['moduleLoaded', 'compatibility', 'hookInstallation', 'resolvedHooks']}
+        guidance = ''
+        if diagnostic.get('hookInstallation') == 'INSTALLED_2':
+            guidance = ' The controller observed installed hooks; missing module injection is not supported by this probe. Reassess the selected decision method, its callers, early returns and cached results.'
         raise ValueError('Independent AVD verification failed: ' + report.get('reason', report['status'])
+                         + '. Controller runtime observations: ' + json.dumps(summary) + guidance
                          + '. Inspect screenshots, UI XML and hook logs in ' + str(evidence.relative_to(workspace)))
     if report.get('apkSha256') != state['report']['identity']['apkSha256']:
         raise ValueError('Runtime evidence does not match the candidate APK')

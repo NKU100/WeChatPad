@@ -216,6 +216,22 @@ def configure_manager():
     raise RuntimeError('Unable to enable WeChatPad through the official Manager UI')
 
 
+def hook_diagnostics(logs):
+    records = [line for line in logs.splitlines()
+               if 'WeChatPad' in line and 'process skipped:' not in line
+               and any(marker in line for marker in ['status=', 'waiting for Tinker',
+                                                       'resolved tablet=', 'installed 2 WeChat hooks'])]
+    compatible = any('status=COMPATIBLE' in line for line in records)
+    installed = any('installed 2 WeChat hooks' in line for line in records)
+    descriptors = [line.split('resolved ', 1)[1] for line in records if 'resolved tablet=' in line]
+    return {
+        'moduleLoaded': 'OBSERVED' if records else 'NOT_OBSERVED',
+        'compatibility': 'COMPATIBLE' if compatible else 'NOT_OBSERVED',
+        'hookInstallation': 'INSTALLED_2' if installed else 'NOT_OBSERVED',
+        'resolvedHooks': list(dict.fromkeys(descriptors)),
+        'records': list(dict.fromkeys(records))[-12:]}
+
+
 def collect_logs():
     logcat = adb('logcat', '-d', '-v', 'threadtime', check=False)
     save('logcat.txt', logcat)
@@ -320,6 +336,8 @@ def main(mode="full"):
             report['diagnosticError'] = str(diagnostic)
     finally:
         collect_logs()
+        logcat = EVIDENCE / 'logcat.txt'
+        report['runtimeDiagnostics'] = hook_diagnostics(logcat.read_text(errors='replace') if logcat.is_file() else '')
         (EVIDENCE / 'smoke-report.json').write_text(json.dumps(report, indent=2) + '\n')
         (EVIDENCE / 'summary.md').write_text('# WeChat runtime smoke\n\n' + json.dumps(report, indent=2)
                                             + '\n\nNo QR scanning, account login or dual-device session was performed.\n')

@@ -12,10 +12,12 @@ def model_command(directory, env, command):
     workspace = directory / 'checkout'
     home = workspace / 'work/analysis/model-home'
     home.mkdir(parents=True, exist_ok=True)
-    debug_key = Path(env['HOME']) / '.android/debug.keystore'
+    debug_key = Path(env.get('WECHATPAD_DEBUG_KEYSTORE', str(Path(env['HOME']) / '.android/debug.keystore')))
     if debug_key.is_file():
         (home / '.android').mkdir(exist_ok=True)
         shutil.copyfile(debug_key, home / '.android/debug.keystore')
+        if env.get('WECHATPAD_DEBUG_KEYSTORE'):
+            env['WECHATPAD_DEBUG_KEYSTORE'] = str(home / '.android/debug.keystore')
     gradle = home / '.gradle'
     cached = Path(env.get('GRADLE_USER_HOME', str(Path(env['HOME']) / '.gradle')))
     for name in ['caches/modules-2', 'wrapper/dists']:

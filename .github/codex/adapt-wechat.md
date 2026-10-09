@@ -28,6 +28,13 @@ and your new module before independently checking the Phone & Tablet entry,
 installed hooks and a stable QR page after each completed turn. Failed probes
 provide screenshots, UI XML and logs under work/analysis/runtime. A unique
 static match alone does not prove the Hook controls the requested behavior.
+Trace the selected decision method through its callers, early returns and caches.
+A device-specific helper is sufficient only if the actual login path reliably
+reaches it and its result controls the overall decision. Controller runtime
+reports distinguish observed module loading, compatibility and Hook installation
+from entry visibility. When installation is observed but the entry is absent,
+reassess the Hook selection instead of assuming injection failed. Consult fresh
+logcat as well as LSPosed files; an empty module log alone is inconclusive.
 
 Allowed changes: compatibility/targets.json, app/src/main/kotlin,
 compat-core/src/main/kotlin, and their existing test directories. Do not modify

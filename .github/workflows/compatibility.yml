@@ -537,6 +537,9 @@ jobs:
       - name: Prepare static validation dependencies
         if: steps.claim.outputs.claimed == 'true'
         run: |
+          export WECHATPAD_DEBUG_KEYSTORE="$RUNNER_TEMP/wechatpad-debug.keystore"
+          keytool -genkeypair -keystore "$WECHATPAD_DEBUG_KEYSTORE" -storepass android -keypass android -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -dname 'CN=Android Debug,O=Android,C=US'
+          echo "WECHATPAD_DEBUG_KEYSTORE=$WECHATPAD_DEBUG_KEYSTORE" >> "$GITHUB_ENV"
           sdkmanager 'platforms;android-37.2' 'build-tools;37.0.0'
           ./gradlew --no-daemon :app:testDebugUnitTest :compat-core:test :compat-checker:test :app:assembleDebug
 

@@ -38,14 +38,32 @@ class RuntimeAdaptationTest(unittest.TestCase):
             def probe(mode):
                 self.assertEqual('probe', mode)
                 (runtime.smoke.EVIDENCE / 'smoke-report.json').write_text(json.dumps({
-                    'status': 'FAILED', 'reason': 'No tablet login choice', 'apkSha256': sha256(wechat)}))
+                    'status': 'FAILED', 'reason': 'No tablet login choice', 'apkSha256': sha256(wechat),
+                    'runtimeDiagnostics': {'moduleLoaded': 'OBSERVED', 'compatibility': 'COMPATIBLE',
+                                           'hookInstallation': 'INSTALLED_2', 'resolvedHooks': ['tablet=fixture']}}))
                 (runtime.smoke.EVIDENCE / 'failure.xml').write_text('<hierarchy/>')
                 return 1
             with patch.dict('os.environ'), patch.object(runtime.smoke, 'adb', return_value=MagicMock(stdout=b'installed', stderr=b'')), patch.object(runtime.smoke, 'reboot'), patch.object(runtime.smoke, 'configure_manager'), patch.object(runtime.smoke, 'main', side_effect=probe):
-                with self.assertRaisesRegex(ValueError, 'Independent AVD verification failed'):
+                with self.assertRaisesRegex(ValueError, 'missing module injection is not supported'):
                     runtime.verify_runtime(directory)
             self.assertTrue((workspace / 'work/analysis/runtime/iteration-001/failure.xml').exists())
             self.assertEqual(sha256(apk), json.loads((directory / 'runtime-report.json').read_text())['moduleApkSha256'])
+
+    def test_diagnostics_include_fresh_hook_records_and_exclude_secondary_processes(self):
+        diagnostics = runtime.smoke.hook_diagnostics('\n'.join([
+            'LSPosedFramework (com.tencent.mm)[WeChatPad] status=COMPATIBLE',
+            'LSPosedFramework (com.tencent.mm)[WeChatPad] resolved tablet=Lfixture/A;->a()Z login=Lfixture/B;->b()V',
+            'LSPosedFramework (com.tencent.mm)[WeChatPad] installed 2 WeChat hooks',
+            'LSPosedFramework [WeChatPad] process skipped: com.tencent.mm:push']))
+        self.assertEqual('OBSERVED', diagnostics['moduleLoaded'])
+        self.assertEqual('INSTALLED_2', diagnostics['hookInstallation'])
+        self.assertEqual(1, len(diagnostics['resolvedHooks']))
+        self.assertEqual(3, len(diagnostics['records']))
+
+    def test_absent_logs_are_not_proof_of_injection_failure(self):
+        diagnostics = runtime.smoke.hook_diagnostics('ActivityManager installed WeChatPad\n')
+        self.assertEqual('NOT_OBSERVED', diagnostics['moduleLoaded'])
+        self.assertEqual('NOT_OBSERVED', diagnostics['hookInstallation'])
 
 
 if __name__ == '__main__':

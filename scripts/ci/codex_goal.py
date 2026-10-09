@@ -257,7 +257,7 @@ def run_goal(client, directory, prompt, token_budget):
 
 def run_model_goal(directory, prompt_path, token_budget):
     allowed = {'PATH', 'HOME', 'LANG', 'LC_ALL', 'JAVA_HOME', 'ANDROID_HOME', 'ANDROID_SDK_ROOT',
-               'GRADLE_USER_HOME', 'CODEX_HOME', 'SSL_CERT_FILE', 'TMPDIR'}
+               'GRADLE_USER_HOME', 'CODEX_HOME', 'SSL_CERT_FILE', 'TMPDIR', 'WECHATPAD_DEBUG_KEYSTORE'}
     env = {key: value for key, value in os.environ.items() if key in allowed}
     if type(token_budget) is not int or token_budget <= 0:
         raise ValueError('Goal token budget must be a positive integer')

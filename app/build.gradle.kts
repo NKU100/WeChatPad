@@ -32,8 +32,12 @@ val signingKeyAlias = signingValue("keyAlias", "WECHATPAD_KEY_ALIAS")
 val signingKeyPassword = signingValue("keyPassword", "WECHATPAD_KEY_PASSWORD")
 val hasStableSigningKey = signingStoreFile?.isFile == true &&
         signingStorePassword != null && signingKeyAlias != null && signingKeyPassword != null
+val disposableDebugKey = System.getenv("WECHATPAD_DEBUG_KEYSTORE")?.let(::File)
+require(disposableDebugKey == null || disposableDebugKey.isFile) {
+    "Configured disposable debug keystore does not exist"
+}
 
-if (!hasStableSigningKey) {
+if (!hasStableSigningKey && disposableDebugKey == null) {
     logger.warn("WeChatPad signing key is not configured; using the default debug key")
 }
 
@@ -68,6 +72,11 @@ android {
     }
 
     signingConfigs {
+        if (disposableDebugKey != null) {
+            getByName("debug") {
+                storeFile = disposableDebugKey
+            }
+        }
         if (hasStableSigningKey) {
             create("stable") {
                 storeFile = signingStoreFile
@@ -80,7 +89,9 @@ android {
 
     buildTypes {
         debug {
-            if (hasStableSigningKey) {
+            if (disposableDebugKey != null) {
+                signingConfig = signingConfigs.getByName("debug")
+            } else if (hasStableSigningKey) {
                 signingConfig = signingConfigs.getByName("stable")
             }
         }
