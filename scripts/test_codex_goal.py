@@ -33,6 +33,16 @@ class FakeClient:
 
 
 class GoalTest(unittest.TestCase):
+    def test_long_instructions_remain_in_first_turn_without_exceeding_goal_limit(self):
+        client = FakeClient()
+        prompt = 'Full constraints ' * 500
+        with tempfile.TemporaryDirectory() as root, patch('scripts.ci.codex_goal.write_diagnostics'), patch('scripts.ci.codex_goal.verify'):
+            run_goal(client, Path(root), prompt, 500000)
+        goal = next(p for m, p in client.calls if m == 'thread/goal/set' and 'objective' in p)
+        turn = next(p for m, p in client.calls if m == 'turn/start')
+        self.assertLessEqual(len(goal['objective']), 4000)
+        self.assertTrue(turn['input'][0]['text'].startswith(prompt))
+
     def test_failed_validation_is_fed_back_to_same_thread(self):
         client = FakeClient()
         with tempfile.TemporaryDirectory() as root, patch('scripts.ci.codex_goal.write_diagnostics'):

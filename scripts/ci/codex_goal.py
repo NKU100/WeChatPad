@@ -211,13 +211,13 @@ def run_goal(client, directory, prompt, token_budget):
         'approvalPolicy': 'never', 'sandbox': 'workspace-write', 'ephemeral': False,
         'config': {'model_reasoning_effort': REASONING, 'features.multi_agent': False,
                    'features.multi_agent_v2': False, 'features.goals': True}})['thread']['id']
-    objective = prompt + '\nComplete only when the exact candidate and old-build static checks and module tests/build pass. The controller will independently verify each turn and return failures. Do not weaken checks. If evidence is insufficient, explain it and mark the goal blocked.'
+    objective = 'Adapt the exact candidate APK using only the supplied clean inputs and the full instructions in the first turn. Preserve existing profiles and tests, obey allowed edit paths and isolation constraints. Complete only when independent candidate and old-build static checks and module tests/build pass. Do not weaken checks. If evidence is insufficient, explain it and mark the goal blocked.'
     if state.get('runtime'):
         objective += '\nThis Goal also requires independent AVD verification of installed hooks, the Phone & Tablet entry and a stable LoginAsExDeviceUI QR page. Use adb to debug the disposable emulator described in work/analysis/runtime-device.json. Static success alone is insufficient. Screenshots and runtime logs from rejected turns will be placed under work/analysis/runtime.'
     client.request('thread/goal/set', {'threadId': thread, 'objective': objective,
                                       'tokenBudget': token_budget, 'status': 'paused'})
     iterations = []
-    feedback = objective
+    feedback = prompt + '\n' + objective
     previous_error = None
     repeated = 0
     try:
