@@ -71,10 +71,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release download experimental-ramdisk-api37.2-r06-magisk31.0 \
-            --pattern ramdisk37-patched.img --pattern LSPosed-v2.2.0-7854-release.zip --dir work/runtime-smoke
+            --pattern ramdisk37-patched.img --pattern LSPosed-v2.2.1-7912-release.zip --dir work/runtime-smoke
           echo 'b49fec2e291582495196d9437bf520f337882bddf763d2530a576f3e4da99df8  work/runtime-smoke/ramdisk37-patched.img' | sha256sum --check
-          echo '725915707f88a4f5ebecddab908cb217aa0a6d98955db5885bc9fadda81e75b8  work/runtime-smoke/LSPosed-v2.2.0-7854-release.zip' | sha256sum --check
-          mv work/runtime-smoke/LSPosed-v2.2.0-7854-release.zip work/runtime-smoke/lsposed.zip
+          echo 'ed37de2d2097aa6ba871377e7bf4ac719b708484f9468928e6abae10ab311e74  work/runtime-smoke/LSPosed-v2.2.1-7912-release.zip' | sha256sum --check
+          mv work/runtime-smoke/LSPosed-v2.2.1-7912-release.zip work/runtime-smoke/lsposed.zip
+          7z e -so work/runtime-smoke/lsposed.zip module.prop | grep -Fxq 'version=v2.2.1 (7912)'
+          7z e -so work/runtime-smoke/lsposed.zip module.prop | grep -Fxq 'versionCode=7912'
           7z e -so work/runtime-smoke/lsposed.zip manager.apk > work/runtime-smoke/manager.apk
           curl --fail --location --silent --show-error --retry 2 --connect-timeout 20 --max-time 180 \
             --proto '=https' --proto-redir '=https' https://github.com/topjohnwu/Magisk/releases/download/v31.0/Magisk-v31.0.apk -o work/runtime-smoke/magisk.apk
