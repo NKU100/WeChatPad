@@ -7,6 +7,17 @@ from scripts.ci.codex_adaptation import validate_paths
 
 
 class AppPolicyTest(unittest.TestCase):
+    def test_wechat_allowlist_uses_impad_package_paths(self):
+        policy = get_policy('wechat')
+        allowed = [
+            'compatibility/wechat/targets.json',
+            policy.app_source_prefix + 'WeChatAppAdapter.kt',
+            'app/src/main/kotlin/io/github/nku100/impad/ImPadModule.kt',
+        ]
+        validate_paths(allowed, 'wechat')
+        with self.assertRaisesRegex(ValueError, 'outside the allowed'):
+            validate_paths(['app/src/main/kotlin/io/github/nku100/wechatpad/Legacy.kt'], 'wechat')
+
     def test_unknown_explicit_app_never_falls_back_to_wechat(self):
         with self.assertRaisesRegex(ValueError, "Unknown or unregistered appId"):
             get_policy("qq")
@@ -22,7 +33,7 @@ class AppPolicyTest(unittest.TestCase):
         )
         with patch.dict(POLICIES, {"testapp": test_policy}):
             validate_paths(["compatibility/testapp/targets.json", "app/src/main/kotlin/example/testapp/Adapter.kt"], "testapp")
-            for path in ["compatibility/wechat/targets.json", "app/src/main/kotlin/io/github/nku100/wechatpad/apps/wechat/Adapter.kt"]:
+            for path in ["compatibility/wechat/targets.json", "app/src/main/kotlin/io/github/nku100/impad/apps/wechat/Adapter.kt"]:
                 with self.subTest(path=path), self.assertRaisesRegex(ValueError, "outside the allowed"):
                     validate_paths([path], "testapp")
 

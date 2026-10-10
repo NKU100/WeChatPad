@@ -39,7 +39,7 @@ require(disposableDebugKey == null || disposableDebugKey.isFile) {
 }
 
 if (!hasStableSigningKey && disposableDebugKey == null) {
-    logger.warn("WeChatPad signing key is not configured; using the default debug key")
+    logger.warn("ImPad signing key is not configured; using the default debug key")
 }
 
 abstract class GenerateCompatibilityTargets : DefaultTask() {
@@ -69,13 +69,13 @@ abstract class GenerateCompatibilityTargets : DefaultTask() {
 }
 
 android {
-    namespace = "io.github.nku100.wechatpad"
+    namespace = "io.github.nku100.impad"
     compileSdk = 37
     compileSdkMinor = 2
     buildToolsVersion = "37.0.0"
 
     defaultConfig {
-        applicationId = "io.github.nku100.wechatpad"
+        applicationId = "io.github.nku100.impad"
         minSdk = 28
         targetSdk = 37
         versionCode = 1
@@ -172,8 +172,18 @@ tasks.register("verifyModuleMetadata") {
         ).redirectErrorStream(true).start()
         val applicationId = process.inputStream.bufferedReader().use { it.readText() }.trim()
         check(process.waitFor() == 0) { "apkanalyzer failed: $applicationId" }
-        check(applicationId == "io.github.nku100.wechatpad") {
+        check(applicationId == "io.github.nku100.impad") {
             "Unexpected application id: $applicationId"
+        }
+
+        val aapt = File(sdkPath, "build-tools/37.0.0/aapt")
+        check(aapt.isFile) { "aapt was not found: $aapt" }
+        val badgingProcess = ProcessBuilder(aapt.absolutePath, "dump", "badging", apk.absolutePath)
+            .redirectErrorStream(true).start()
+        val badging = badgingProcess.inputStream.bufferedReader().use { it.readText() }
+        check(badgingProcess.waitFor() == 0) { "aapt failed to inspect application metadata: $badging" }
+        check("application-label:'I'm Pad'" in badging) {
+            "Unexpected application label in APK metadata"
         }
 
         ZipFile(apk).use { archive ->
@@ -203,7 +213,7 @@ tasks.register("verifyModuleMetadata") {
             val entryClasses = archive.getInputStream(entryPoint).bufferedReader().use { reader ->
                 reader.readLines().map(String::trim).filter(String::isNotEmpty)
             }
-            check(entryClasses == listOf("io.github.nku100.wechatpad.WeChatPadModule")) {
+            check(entryClasses == listOf("io.github.nku100.impad.ImPadModule")) {
                 "Unexpected module entry point: $entryClasses"
             }
 

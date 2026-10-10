@@ -136,8 +136,8 @@ class CodexAdaptationTest(unittest.TestCase):
         self.profile['identity'] = dict(self.identity, apkSha256='c' * 64)
         with self.assertRaisesRegex(ValueError, 'identity'):
             validate_profiles(self.targets, self.targets + [self.profile], self.report)
-        validate_paths(['compatibility/wechat/targets.json', 'compat-core/src/main/kotlin/io/github/nku100/wechatpad/compat/CandidatePipeline.kt'])
-        for path in ['compatibility/targets.json', 'compatibility/qq/targets.json', '.github/workflows/build.yml', 'scripts/ci/codex_adaptation.py', 'gradle.properties', 'compat-checker/src/main/kotlin/Main.kt', 'compat-core/src/main/kotlin/io/github/nku100/wechatpad/compat/Unexpected.kt']:
+        validate_paths(['compatibility/wechat/targets.json', 'compat-core/src/main/kotlin/io/github/nku100/impad/compat/CandidatePipeline.kt'])
+        for path in ['compatibility/targets.json', 'compatibility/qq/targets.json', '.github/workflows/build.yml', 'scripts/ci/codex_adaptation.py', 'gradle.properties', 'compat-checker/src/main/kotlin/Main.kt', 'compat-core/src/main/kotlin/io/github/nku100/impad/compat/Unexpected.kt']:
             with self.assertRaisesRegex(ValueError, 'allowed'):
                 validate_paths([path])
 

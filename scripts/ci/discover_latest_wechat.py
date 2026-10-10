@@ -15,7 +15,7 @@ from scripts.ci.app_policy import get_policy
 OFFICIAL_PAGE = "https://weixin.qq.com/"
 OFFICIAL_HOST = "dldir1v6.qq.com"
 DOWNLOAD_PATH = "/weixin/android/"
-USER_AGENT = "WeChatPadCompatibilityChecker/1.0"
+USER_AGENT = "ImPadCompatibilityChecker/1.0"
 MAX_PAGE_BYTES = 5_000_000
 APK_URL_PATTERN = re.compile(
     r"https://dldir1v6[.]qq[.]com/weixin/android/[A-Za-z0-9._-]+[.]apk",

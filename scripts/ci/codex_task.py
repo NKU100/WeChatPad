@@ -12,7 +12,21 @@ from scripts.ci.codex_adaptation import candidate_key, eligible_candidate
 from scripts.ci.discover_latest_wechat import append_github_output
 
 
-ADAPTATION_LABEL = "wechatpad-adaptation"
+ADAPTATION_LABEL = "impad-adaptation"
+LEGACY_ADAPTATION_LABEL = "wechatpad-adaptation"
+RENAMED_REPOSITORY = "NKU100/ImPad"
+LEGACY_REPOSITORY = "NKU100/WeChatPad"
+
+
+def tracking_markers(key):
+    return (f"<!-- {ADAPTATION_LABEL}:{key} -->",
+            f"<!-- {LEGACY_ADAPTATION_LABEL}:{key} -->")
+
+
+def candidate_attempts(issues, key):
+    markers = tracking_markers(key)
+    return [issue for issue in issues if trusted_attempt(issue)
+            and any(marker in (issue.get("body") or "") for marker in markers)]
 
 
 def trusted_attempt(issue):
@@ -22,10 +36,12 @@ def trusted_attempt(issue):
 
 
 def existing_attempt(issues, key):
-    marker = f"<!-- wechatpad-adaptation:{key} -->"
-    return next((issue for issue in issues if trusted_attempt(issue)
-                 and any(label.get("name") == ADAPTATION_LABEL for label in issue.get("labels", []))
-                 and marker in (issue.get("body") or "")), None)
+    matches = [issue for issue in candidate_attempts(issues, key)
+               if any(label.get("name") in {ADAPTATION_LABEL, LEGACY_ADAPTATION_LABEL}
+                      for label in issue.get("labels", []))]
+    if len(matches) > 1:
+        raise ValueError("Multiple trusted adaptation records match this APK key")
+    return matches[0] if matches else None
 
 
 def retry_allowed(issue, run):
@@ -39,6 +55,19 @@ def retry_allowed(issue, run):
             and run.get("conclusion") in {"failure", "cancelled", "timed_out", "skipped", "startup_failure"})
 
 
+def action_run_id_from_url(url, repo):
+    repositories = [repo]
+    if repo.casefold() == RENAMED_REPOSITORY.casefold():
+        repositories.append(LEGACY_REPOSITORY)
+    for trusted_repo in repositories:
+        match = re.fullmatch(
+            r"https://github\.com/" + re.escape(trusted_repo) + r"/actions/runs/(\d+)", url
+        )
+        if match:
+            return match[1]
+    return None
+
+
 def gh(*args):
     return subprocess.check_output(["gh", *args]).decode().strip()
 
@@ -46,7 +75,7 @@ def gh(*args):
 def issue_body(report, status, run_url, pr_url=""):
     identity = report["identity"]
     policy = policy_for_report(report)
-    lines = [f"<!-- wechatpad-adaptation:{candidate_key(report)} -->", f"Status: `{status}`", "",
+    lines = [f"<!-- impad-adaptation:{candidate_key(report)} -->", f"Status: `{status}`", "",
              f"{policy.display_name} {identity['versionName']} ({identity['versionCode']})", f"APK SHA-256: `{identity['apkSha256']}`",
              f"Source: {report['sourceUrl']}", f"Run: {run_url}", "",
              "Model: `gpt-6-luna`; reasoning: `xhigh`; automatic retries disabled; manual retry available."]
@@ -71,19 +100,20 @@ def claim(repo, report, targets, directory, run_url, retry=False, app_id=None):
     key = candidate_key(report)
     pages = json.loads(gh("api", "--paginate", "--slurp", f"repos/{repo}/issues?state=all&per_page=100"))
     issues = [issue for page in pages for issue in page]
-    # Upgrade existing bot records so introducing the label does not repeat past attempts.
-    marker = f"<!-- wechatpad-adaptation:{key} -->"
-    previous = existing_attempt(issues, key)
-    if previous is None:
-        previous = next((issue for issue in issues if trusted_attempt(issue) and marker in (issue.get("body") or "")), None)
+    # Read both marker generations and fail closed if a candidate has duplicate records.
+    matches = candidate_attempts(issues, key)
+    if len(matches) > 1:
+        raise ValueError("Multiple trusted adaptation records match this APK key; refusing to retry or create another issue")
+    previous = matches[0] if matches else None
     gh("label", "create", ADAPTATION_LABEL, "--repo", repo, "--color", "1D76DB", "--description", f"{policy.display_name} adaptation pipeline record", "--force")
     if previous:
         gh("issue", "edit", str(previous["number"]), "--repo", repo, "--add-label", ADAPTATION_LABEL)
         body_text = previous.get("body") or ""
         run = None
-        run_match = re.search(r"^Run: https://github\.com/" + re.escape(repo) + r"/actions/runs/(\d+)$", body_text, re.MULTILINE)
-        if retry and run_match and 'Status: `ADAPTATION_RUNNING`' in body_text:
-            run = json.loads(gh("api", f"repos/{repo}/actions/runs/{run_match[1]}"))
+        run_url_match = re.search(r"^Run: (\S+)$", body_text, re.MULTILINE)
+        run_id = action_run_id_from_url(run_url_match[1], repo) if run_url_match else None
+        if retry and run_id and 'Status: `ADAPTATION_RUNNING`' in body_text:
+            run = json.loads(gh("api", f"repos/{repo}/actions/runs/{run_id}"))
         if retry and retry_allowed(previous, run):
             if previous.get("state") == "closed":
                 gh("issue", "reopen", str(previous["number"]), "--repo", repo)

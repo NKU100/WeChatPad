@@ -40,7 +40,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: wechatpad-runtime-smoke
+  group: impad-runtime-smoke
   cancel-in-progress: false
   queue: max
 

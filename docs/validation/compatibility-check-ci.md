@@ -1,5 +1,7 @@
 # 兼容检测 CI
 
+当前发布模块包名为 `io.github.nku100.impad`，显示名为 `I'm Pad`。包名从旧版 WeChatPad 变更后，需卸载旧包再安装新包，并在 LSPosed 中确认新模块对微信的作用域已启用。当前生产兼容策略、静态作用域和自动验证只注册微信（`com.tencent.mm`）；QQ 与企业微信属于计划适配范围，尚未注册生产适配器或兼容 profile。
+
 工作流 `Check WeChat compatibility` 每天北京时间 10:23（UTC 02:23）自动触发，也可手动运行。默认从微信官网首页发现最高版本的 ARM64 APK 候选。自动和手动触发均只检查官网最新 ARM64 APK，不提供指定版本入口。下载后以 APK 内实际版本、官方签名和 SHA-256 为准。已正式支持且 APK 摘要未变化时提前结束，不启动静态矩阵、构建、Codex 或 AVD；手动选中 `force_recheck` 可重新静态检查。需要分析时再按候选版本选择静态回归窗口：新候选加上版本码最高的两个已正式支持旧版，已支持候选检查候选本身和最多两个较早的正式支持版本。报告列明本次实际检查的版本，历史 profile 保留。
 
 ## 检查流程
@@ -35,7 +37,7 @@
 
 ## Codex 适配
 
-`Run workflow` 中的 `run_codex` 默认为开启，只在主分支手动或定时运行中发现可信的未登记构建时调用模型。关闭该选项可只运行静态检测。每个构建以版本码和完整 APK SHA-256 维护 Issue 记录，只认可 `github-actions[bot]` 创建且带 `wechatpad-adaptation` 标签的记录，排除 PR。旧的机器人记录会补上标签，不重复适配。已有记录默认跳过，失败或超时不会自动再次调用模型。手动开启 `retry_adaptation` 可复用原 Issue 重试失败、取消、超时或跳过的适配；仍在执行的任务不能重试。显式重试也可重新适配运行验证失败或等待运行验证的候选；保留旧 PR，新尝试使用按 workflow run 区分的分支和草稿 PR。未勾选重试时仍跳过。任务串行运行，通过 Codex app-server 为每个构建创建一个 Goal，固定使用 `gpt-6-luna` 和 `xhigh`，关闭多代理能力，不自动升级模型。Goal 默认总 Token 预算为 500000，手动入口可用 `goal_token_budget` 调整为正整数；达到预算或用量限制、明确受阻、同一验收错误连续出现三次时停止。每轮结束后控制器暂停 Goal 并等待线程空闲，再独立验证改动；失败原因反馈给同一线程继续修正，不创建新适配任务。模型标记完成不能绕过独立验收。不设置模型进程或适配 job 的额外时间上限；任务仍受 GitHub Actions 平台限制，单次适配的订阅消耗取决于实际工作量。
+`Run workflow` 中的 `run_codex` 默认为开启，只在主分支手动或定时运行中发现可信的未登记构建时调用模型。关闭该选项可只运行静态检测。每个构建以版本码和完整 APK SHA-256 维护 Issue 记录，只认可 `github-actions[bot]` 创建且带 `impad-adaptation` 标签的记录，排除 PR。旧的机器人记录会补上标签，不重复适配。已有记录默认跳过，失败或超时不会自动再次调用模型。手动开启 `retry_adaptation` 可复用原 Issue 重试失败、取消、超时或跳过的适配；仍在执行的任务不能重试。显式重试也可重新适配运行验证失败或等待运行验证的候选；保留旧 PR，新尝试使用按 workflow run 区分的分支和草稿 PR。未勾选重试时仍跳过。任务串行运行，通过 Codex app-server 为每个构建创建一个 Goal，固定使用 `gpt-6-luna` 和 `xhigh`，关闭多代理能力，不自动升级模型。Goal 默认总 Token 预算为 500000，手动入口可用 `goal_token_budget` 调整为正整数；达到预算或用量限制、明确受阻、同一验收错误连续出现三次时停止。每轮结束后控制器暂停 Goal 并等待线程空闲，再独立验证改动；失败原因反馈给同一线程继续修正，不创建新适配任务。模型标记完成不能绕过独立验收。不设置模型进程或适配 job 的额外时间上限；任务仍受 GitHub Actions 平台限制，单次适配的订阅消耗取决于实际工作量。
 
 托管 runner 安装发行版 bubblewrap，并加载可用的专用 AppArmor profile。调用模型前通过同一 app-server 执行 workspace-write 沙箱命令，检查候选文件可读和工作目录可写；检查失败时不创建 Goal、不消耗模型 Token。模型获得包含完整 Git 历史和全部已跟踪文件的独立 checkout、原始 APK 和完整候选分析报告，自行选择所需上下文，并根据候选 APK 和运行行为确认适配结论。独立 checkout 不配置远端，不复制原仓库工作目录中的未跟踪文件或 Git 配置。外层 bubblewrap 仅挂载独立 checkout、独立用户目录、认证目录和工具；Gradle 只复制依赖与 wrapper 缓存，不暴露原仓库、项目构建缓存和控制器状态。预检验证原仓库与控制器状态不可读。模型可使用 jadx 检查真实 APK。控制器拒绝修改既有 profile、检查器、脚本、工作流和构建配置。新增 profile 必须使用已校验的身份和来源，状态只能为 `static-verified`。候选和最多两个较早正式支持版本分别经过共用检查器；核心测试、模块测试和 debug APK 构建通过后才发布 draft PR，并把 Issue 状态更新为 `WAITING_RUNTIME`。模型失败或静态检查失败时，Issue 和结果报告停留在 `NEEDS_HOOK_REVIEW`。
 
@@ -53,13 +55,13 @@ PR 分支包含静态适配。流水线随后自动执行托管 AVD 登录界面
 为写回创建 fine-grained GitHub token，只选择此仓库，授予仓库 **Secrets: Read and write** 权限；无需给这个 token 代码写入或 PR 权限。将其录入 Secret：
 
 ```sh
-gh secret set CODEX_AUTH_WRITE_TOKEN --repo NKU100/WeChatPad
+gh secret set CODEX_AUTH_WRITE_TOKEN --repo NKU100/ImPad
 ```
 
 然后执行独立登录脚本，在浏览器中完成 device-code 登录。脚本使用临时 `CODEX_HOME`，上传后删除本地临时凭据，避免和桌面会话共用刷新状态：
 
 ```sh
-bash scripts/setup_codex_ci_auth.sh NKU100/WeChatPad
+bash scripts/setup_codex_ci_auth.sh NKU100/ImPad
 ```
 
 runner 在模型调用前恢复凭据，Goal 结束后即使模型失败也写回刷新后的文件，删除认证文件，再执行发布前的最终独立验收。写回 token 不传给模型进程。登录凭据和会话目录不上传 artifact。产物中的 `goal-diagnostics.json` 保留每轮验收结果、Goal 用量、模型最终说明及失败工具摘要；已知认证凭据和常见 Token 格式在写入前过滤。凭据失效或 token 到期需要重新配置；不得通过自动重复适配来尝试修复登录。
@@ -70,13 +72,13 @@ runner 在模型调用前恢复凭据，Goal 结束后即使模型失败也写�
 
 控制器完整记录发给 app-server 的请求和收到的响应、通知，包括任务提示、工具调用及成功和失败命令的输出；每条 JSONL 记录包含 UTC 时间、方向和协议消息。记录不截断、不脱敏，直接通过管道送入 age 加密，不生成明文会话文件，也不写入 Actions 控制台或摘要。这里的完整记录指 app-server 对外提供的协议事件，不包含未公开的模型内部内容、认证文件、CLI 会话目录或原始 stderr。
 
-模型成功或失败后，完成加密的 `session.jsonl.age` 和现有诊断文件一起作为 `wechatpad-codex-adaptation` artifact 保存 14 天。加密失败会删除未完成密文；上传清单仅包含完成后的文件。runner 被强制终止时可能没有可恢复的完整记录。任何取得 artifact 的人只能获得密文，runner 在处理事件时仍可接触明文；仅使用可信主分支工作流。
+模型成功或失败后，完成加密的 `session.jsonl.age` 和现有诊断文件一起作为 `impad-codex-adaptation` artifact 保存 14 天。加密失败会删除未完成密文；上传清单仅包含完成后的文件。runner 被强制终止时可能没有可恢复的完整记录。任何取得 artifact 的人只能获得密文，runner 在处理事件时仍可接触明文；仅使用可信主分支工作流。
 
 本机安装 age 后，在仓库外用私钥解密，再交给本机 Codex 分析：
 
 ```sh
 umask 077
-age --decrypt --identity ~/.config/wechatpad/ci-trace.agekey \
+age --decrypt --identity ~/.config/impad/ci-trace.agekey \
   --output session.jsonl session.jsonl.age
 ```
 
@@ -99,7 +101,7 @@ age --decrypt --identity ~/.config/wechatpad/ci-trace.agekey \
 勾选 `rebuild_ramdisk` 可同时从官方输入重建 root ramdisk，校验与 Release 产物逐字节一致，再执行冒烟。制作步骤及本地命令见 [AVD root ramdisk 制作](../environment/ramdisk-build.md)。
 
 会话记录另按最多 32 条事件或 1 MiB 明文缓冲划分为独立 age 密文分段，不落地明文。
-可信 action 在模型运行期间每分钟上传 `wechatpad-codex-live-*` artifact，包含本轮新增的完整密文分段与 runner 的内存、磁盘、进程名和 cgroup 计数；上传凭据不会传给模型。
+可信 action 在模型运行期间每分钟上传 `impad-codex-live-*` artifact，包含本轮新增的完整密文分段与 runner 的内存、磁盘、进程名和 cgroup 计数；上传凭据不会传给模型。
 正常结束仍保留完整 `session.jsonl.age`。异常结束时按分段文件名排序分别解密即可恢复已上传的前缀，未形成完整分段或尚未上传的尾部可能丢失。
 SIGTERM/SIGINT 会触发控制器诊断和加密收尾；SIGKILL、runner 丢失或平台终止整个 action 时，只能依靠此前已上传的快照，不保证最后一次上传成功。
 
@@ -110,7 +112,7 @@ JADX 启动器使用共享文件锁串行执行反编译，JVM 堆上限为 4 Gi
 每轮生成临时 debug keystore，基线、模型构建和宿主验收通过 `WECHATPAD_DEBUG_KEYSTORE` 显式选择同一份密钥，避免不同 HOME 下默认 debug key 不一致；此密钥不用于正式发布。
 运行报告从本次探测的新鲜 logcat 提取模块加载、兼容状态、Hook 安装及实际描述符，失败反馈直接提供这些观察。未观察到记录不等于证明注入失败；已安装 Hook 而入口缺失时，应重新核查所选方法的调用路径、提前返回和缓存。
 模型沙箱通过工作区文件请求中转访问专用 ADB server，宿主控制器执行命令并返回原始输出；预检确认固定模拟器可访问。中转固定设备、限制设备命令和本地文件路径，外部网络仍关闭。禁网沙箱禁止 Unix socket 的 connect 调用，因此不让模型直接连接 ADB socket。
-模型使用 `adb wechat-launch` 在安装、清数据或重启后恢复 16 KB 兼容设置并启动微信；设置和 Magisk 路径与独立冒烟共用。添加 profile 后，可用 `wechatpad-build` 请求宿主执行已有改动范围保护、静态回归、测试和构建，日志写入 `work/analysis/host-build`。此命令不接受额外参数，不代替最终验收。
+模型使用 `adb wechat-launch` 在安装、清数据或重启后恢复 16 KB 兼容设置并启动微信；设置和 Magisk 路径与独立冒烟共用。添加 profile 后，可用 `impad-build` 请求宿主执行已有改动范围保护、静态回归、测试和构建，日志写入 `work/analysis/host-build`。此命令不接受额外参数，不代替最终验收。
 中转检测被取消的客户端请求并终止对应进程组；普通设备命令超时为 30 秒，传文件和等待设备为 120 秒，安装为 240 秒。独立 AVD 冒烟结束后，还验证受控启动、截图二进制输出和取消请求后的队列恢复，报告保存为 `tooling/tooling-report.json`。
 同一个 Goal 每轮依次通过静态检查、测试、构建和 AVD 行为验收。运行验收安装可信控制器保存的精确候选 APK 和本轮模块，验证两个 hook、平板入口和稳定二维码页面；失败证据复制到模型工作区，交回原会话修正。更换证据目录不会重置连续三次同类错误的停止计数。
-通过这轮验收后才创建草稿 PR，随后原有独立 job 在新的干净 AVD 再次冒烟，只有该独立结果可以晋级 `runtime-verified-hosted`。运行中的诊断继续加密保存，适配 AVD 的普通失败证据单独上传为 `wechatpad-adaptation-avd`。
+通过这轮验收后才创建草稿 PR，随后原有独立 job 在新的干净 AVD 再次冒烟，只有该独立结果可以晋级 `runtime-verified-hosted`。运行中的诊断继续加密保存，适配 AVD 的普通失败证据单独上传为 `impad-adaptation-avd`。

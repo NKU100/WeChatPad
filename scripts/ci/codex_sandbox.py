@@ -28,7 +28,7 @@ def model_command(directory, env, command):
     env['JAVA_TOOL_OPTIONS'] = f'-Duser.home="{home}"'
     env['GRADLE_USER_HOME'] = str(gradle)
     env['TMPDIR'] = '/tmp'
-    env['WECHATPAD_JADX_LOCK'] = str(workspace / 'work/analysis/jadx.lock')
+    env['IMPAD_JADX_LOCK'] = str(workspace / 'work/analysis/jadx.lock')
     args = ['bwrap', '--die-with-parent', '--new-session', '--unshare-pid',
             '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp']
     mounted = []
@@ -61,11 +61,11 @@ def model_command(directory, env, command):
         shutil.copyfile(Path(__file__).with_name('adb-device.sh'), wrapper)
         shutil.copyfile(Path(__file__).with_name('adb_relay_client.py'), tools / 'bin/adb_relay_client.py')
         wrapper.chmod(0o755)
-        builder = tools / 'bin/wechatpad-build'
+        builder = tools / 'bin/impad-build'
         shutil.copyfile(Path(__file__).with_name('host-build.sh'), builder)
         builder.chmod(0o755)
         bind(tools)
         env['PATH'] = str(tools / 'bin') + ':' + env['PATH']
-        env['WECHATPAD_ADB_RELAY'] = str(workspace / 'work/analysis/adb-relay')
+        env['IMPAD_ADB_RELAY'] = str(workspace / 'work/analysis/adb-relay')
     args += ['--chdir', str(workspace), '--', *command]
     return args

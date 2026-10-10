@@ -41,8 +41,8 @@ jobs:
         uses: actions/cache@v5
         with:
           path: .cache/wechat-apks
-          key: wechatpad-static-apks-${{ hashFiles('compatibility/wechat/targets.json') }}
-          restore-keys: wechatpad-static-apks-
+          key: impad-static-apks-${{ hashFiles('compatibility/wechat/targets.json') }}
+          restore-keys: impad-static-apks-
 
       - name: Run registered-build static regression
         run: python3 -m scripts.ci.static_regression
@@ -51,7 +51,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: wechatpad-static-regression
+          name: impad-static-regression
           path: work/static-regression/
           if-no-files-found: ignore
           retention-days: 14
@@ -79,13 +79,13 @@ jobs:
           done
 
           if [[ "$configured_secrets" -eq 0 ]]; then
-            echo '::warning::WeChatPad signing Secrets are not configured; using the runner debug key. Reinstall the module to update if the signer changes between runs.'
+            echo '::warning::ImPad signing Secrets are not configured; using the runner debug key. Reinstall the module to update if the signer changes between runs.'
             ./gradlew --no-daemon :app:assembleDebug
             exit 0
           fi
 
           if [[ "$configured_secrets" -ne 4 ]]; then
-            echo 'Incomplete WeChatPad signing Secrets: configure all four Secrets or remove them all to use the runner debug key.' >&2
+            echo 'Incomplete ImPad signing Secrets: configure all four Secrets or remove them all to use the runner debug key.' >&2
             exit 1
           fi
 
@@ -107,7 +107,7 @@ jobs:
       - name: Upload module APK
         uses: actions/upload-artifact@v7
         with:
-          name: wechatpad-module-apk
+          name: impad-module-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14

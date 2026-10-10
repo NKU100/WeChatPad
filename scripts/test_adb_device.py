@@ -21,7 +21,7 @@ class AdbDeviceTest(unittest.TestCase):
             (root / 'state.json').write_text(json.dumps({'worktree': str(root), 'runtime': {'socket': str(root / 'adb.sock'), 'serial': 'emulator-5554'}}))
             env = dict(os.environ, ANDROID_HOME=str(root))
             relay = DeviceRelay(root, env)
-            env['WECHATPAD_ADB_RELAY'] = str(relay.root)
+            env['IMPAD_ADB_RELAY'] = str(relay.root)
             try:
                 result = subprocess.check_output(['bash', str(Path('scripts/ci/adb-device.sh').resolve()), 'shell', 'id'], env=env, text=True, cwd=root)
             finally:
@@ -31,13 +31,13 @@ class AdbDeviceTest(unittest.TestCase):
             self.assertEqual(['-s', 'emulator-5554', 'shell', 'id'], parsed['args'])
 
     def test_server_commands_and_device_overrides_are_rejected(self):
-        env = dict(os.environ, WECHATPAD_ADB_RELAY='/unused')
+        env = dict(os.environ, IMPAD_ADB_RELAY='/unused')
         for command in ['kill-server', 'start-server', 'connect', '-s', '-H', '-P', '-L']:
             result = subprocess.run(['bash', 'scripts/ci/adb-device.sh', command], env=env, capture_output=True)
             self.assertEqual(2, result.returncode)
 
     def test_wrapper_allows_managed_app_launch_command(self):
-        env = dict(os.environ, WECHATPAD_ADB_RELAY='/nonexistent-managed-relay')
+        env = dict(os.environ, IMPAD_ADB_RELAY='/nonexistent-managed-relay')
         result = subprocess.run(['bash', 'scripts/ci/adb-device.sh', 'app-launch'], env=env, capture_output=True)
         self.assertNotEqual(2, result.returncode)
         self.assertNotIn(b'Use a device command', result.stderr)
@@ -65,7 +65,7 @@ class AdbDeviceTest(unittest.TestCase):
             relay = DeviceRelay(root, env)
             try:
                 result = subprocess.run(['bash', str(Path('scripts/ci/adb-device.sh').resolve()), 'exec-out', 'screencap', '-p'],
-                                        env=dict(env, WECHATPAD_ADB_RELAY=str(relay.root)), capture_output=True, cwd=root)
+                                        env=dict(env, IMPAD_ADB_RELAY=str(relay.root)), capture_output=True, cwd=root)
             finally:
                 relay.close()
             self.assertEqual(7, result.returncode)
@@ -82,7 +82,7 @@ class AdbDeviceTest(unittest.TestCase):
             (root / 'state.json').write_text(json.dumps({'worktree': str(root), 'runtime': {'socket': str(root / 'adb.sock'), 'serial': 'emulator-5554'}}))
             env = dict(os.environ, ANDROID_HOME=str(root))
             relay = DeviceRelay(root, env)
-            env['WECHATPAD_ADB_RELAY'] = str(relay.root)
+            env['IMPAD_ADB_RELAY'] = str(relay.root)
             wrapper = str(Path('scripts/ci/adb-device.sh').resolve())
             client = subprocess.Popen(['bash', wrapper, 'shell', 'hang'], cwd=root, env=env)
             try:

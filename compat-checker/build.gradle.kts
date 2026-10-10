@@ -10,7 +10,7 @@ kotlin {
 }
 
 application {
-    mainClass = "io.github.nku100.wechatpad.checker.MainKt"
+    mainClass = "io.github.nku100.impad.checker.MainKt"
 }
 
 tasks.named<JavaExec>("run") {

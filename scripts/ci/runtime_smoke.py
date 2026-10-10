@@ -27,7 +27,8 @@ APP_ID = 'wechat'
 APP_POLICY = get_policy(APP_ID)
 APP_PACKAGE = APP_POLICY.package_name
 UI_STRATEGY = importlib.import_module(APP_POLICY.runtime_ui_strategy)
-MODULE = 'io.github.nku100.wechatpad'
+MODULE = 'io.github.nku100.impad'
+MODULE_LABEL = "I'm Pad"
 stage = 'START'
 
 
@@ -104,7 +105,9 @@ def ocr_target(tsv, label):
     matches = []
     for words in lines.values():
         text = ' '.join(word['text'] for word in words)
-        if text.casefold() != label.casefold() or any(float(word['conf']) < 70 for word in words):
+        normalized_text = re.sub(r'[^\w]+', ' ', text.casefold()).strip()
+        normalized_label = re.sub(r'[^\w]+', ' ', label.casefold()).strip()
+        if normalized_text != normalized_label or any(float(word['conf']) < 70 for word in words):
             continue
         left = min(int(word['left']) for word in words)
         top = min(int(word['top']) for word in words)
@@ -194,10 +197,10 @@ def bootstrap_magisk():
                 (files / Path(name).name).write_bytes(apk.read(name))
         for binary in ('busybox', 'magisk', 'magiskboot', 'magiskinit', 'magiskpolicy', 'bootctl'):
             (files / binary).write_bytes(apk.read(f'lib/x86_64/lib{binary}.so'))
-    adb('shell', 'mkdir', '-p', '/data/local/tmp/wechatpad-magisk-files')
+    adb('shell', 'mkdir', '-p', '/data/local/tmp/impad-magisk-files')
     for file in files.iterdir():
-        adb('push', str(file), '/data/local/tmp/wechatpad-magisk-files/' + file.name)
-    save('magisk-bootstrap.txt', su('mkdir -p /data/adb/magisk; cp /data/local/tmp/wechatpad-magisk-files/* /data/adb/magisk/; chmod -R 755 /data/adb/magisk'))
+        adb('push', str(file), '/data/local/tmp/impad-magisk-files/' + file.name)
+    save('magisk-bootstrap.txt', su('mkdir -p /data/adb/magisk; cp /data/local/tmp/impad-magisk-files/* /data/adb/magisk/; chmod -R 755 /data/adb/magisk'))
     save('preinit-device.txt', su(MAGISK + ' --preinit-device', check=False))
     adb('install', '-r', str(ROOT / 'magisk.apk'), timeout=120)
 
@@ -207,13 +210,13 @@ def configure_manager():
     for _ in range(10):
         _, ui = snapshot('manager-current')
         enabled = unique_node(ui, lambda n: 'Switch' in n.get('class', '') and n.get('checkable') == 'true')
-        if enabled is not None and any(n.get('text') == 'WeChatPad' for n in nodes(ui)):
+        if enabled is not None and any(n.get('text') == MODULE_LABEL for n in nodes(ui)):
             if enabled.get('checked') != 'true':
                 tap(enabled)
                 _, ui = snapshot('manager-enabled')
                 enabled = unique_node(ui, lambda n: 'Switch' in n.get('class', '') and n.get('checkable') == 'true')
             if enabled is None or enabled.get('checked') != 'true':
-                raise RuntimeError('Manager did not confirm WeChatPad enabled')
+                raise RuntimeError(f'Manager did not confirm {MODULE_LABEL} enabled')
             return
         tsv = manager_ocr()
         enable = ocr_target(tsv, 'Enable module')
@@ -222,16 +225,16 @@ def configure_manager():
             snapshot('manager-enable-requested')
             # The final hook logs and QR page verify that enabling took effect.
             return
-        node = unique_node(ui, lambda n: n.get('text') == 'WeChatPad')
+        node = unique_node(ui, lambda n: n.get('text') == MODULE_LABEL)
         if node is None:
-            node = ocr_target(tsv, 'WeChatPad')
+            node = ocr_target(tsv, MODULE_LABEL)
         if node is None:
             node = unique_node(ui, lambda n: n.get('text') == 'Modules' or n.get('content-desc') == 'Modules')
         if node is not None:
             tap(node)
         else:
             time.sleep(2)
-    raise RuntimeError('Unable to enable WeChatPad through the official Manager UI')
+    raise RuntimeError(f'Unable to enable {MODULE_LABEL} through the official Manager UI')
 
 
 def hook_diagnostics(logs):
@@ -291,7 +294,12 @@ def prepare_environment(report):
     save('lsposed-install.txt', result)
     if result.returncode:
         raise RuntimeError('Official LSPosed installer failed; see lsposed-install.txt')
-    save('module-install.txt', adb('install', '-r', str(ROOT / 'module/app-debug.apk'), timeout=120))
+    module_install = adb('install', '-r', str(ROOT / 'module/app-debug.apk'), timeout=120)
+    save('module-install.txt', module_install)
+    module_path = adb('shell', 'pm', 'path', MODULE, check=False)
+    save('module-package-probe.txt', module_path)
+    if module_path.returncode or not module_path.stdout.decode(errors='replace').strip().startswith('package:'):
+        raise RuntimeError(f'Installed module package {MODULE} was not found')
     save('manager-install.txt', adb('install', '-r', str(ROOT / 'manager.apk'), timeout=120))
     reboot()
     stage = 'FRAMEWORK_START'

@@ -21,7 +21,7 @@ Existing regression tests must remain unchanged; add new tests when necessary.
 When work/analysis/runtime-device.json exists, a disposable rooted AVD is ready
 with the exact candidate APK and official LSPosed.
 Run `adb wechat-launch` after install, clear, or reboot; it restores the 16 KB
-compatibility settings and launches the exact candidate. Run `wechatpad-build`
+compatibility settings and launches the exact candidate. Run `impad-build`
 after adding a candidate profile to request the guarded host static checks,
 regressions, tests and APK build. Read its logs under work/analysis/host-build.
 Gradle uses sockets even offline; do not retry Gradle inside the network-disabled

@@ -12,7 +12,7 @@ def main():
     def interrupted(number, frame):
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, interrupted)
-    root = Path(os.environ['WECHATPAD_ADB_RELAY'])
+    root = Path(os.environ['IMPAD_ADB_RELAY'])
     key = uuid.uuid4().hex
     temporary = root / (key + '.tmp')
     try:

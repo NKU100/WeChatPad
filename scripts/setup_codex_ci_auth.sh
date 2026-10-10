@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repository="${1:-NKU100/WeChatPad}"
-auth_directory="$(mktemp -d "${TMPDIR:-/tmp}/wechatpad-codex-ci.XXXXXX")"
+repository="${1:-NKU100/ImPad}"
+auth_directory="$(mktemp -d "${TMPDIR:-/tmp}/impad-codex-ci.XXXXXX")"
 trap 'rm -rf "$auth_directory"' EXIT
 chmod 700 "$auth_directory"
 

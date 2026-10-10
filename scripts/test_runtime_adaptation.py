@@ -78,17 +78,17 @@ class RuntimeAdaptationTest(unittest.TestCase):
 
     def test_diagnostics_include_fresh_hook_records_and_exclude_secondary_processes(self):
         diagnostics = runtime.smoke.hook_diagnostics('\n'.join([
-            'LSPosedFramework (com.tencent.mm)[WeChatPad] status=COMPATIBLE',
-            'LSPosedFramework (com.tencent.mm)[WeChatPad] resolved tablet=Lfixture/A;->a()Z login=Lfixture/B;->b()V',
-            'LSPosedFramework (com.tencent.mm)[WeChatPad] installed 2 WeChat hooks',
-            'LSPosedFramework [WeChatPad] process skipped: com.tencent.mm:push']))
+            'LSPosedFramework (com.tencent.mm)[ImPad] status=COMPATIBLE',
+            'LSPosedFramework (com.tencent.mm)[ImPad] resolved tablet=Lfixture/A;->a()Z login=Lfixture/B;->b()V',
+            'LSPosedFramework (com.tencent.mm)[ImPad] installed 2 WeChat hooks',
+            'LSPosedFramework [ImPad] process skipped: com.tencent.mm:push']))
         self.assertEqual('OBSERVED', diagnostics['moduleLoaded'])
         self.assertEqual('INSTALLED_2', diagnostics['hookInstallation'])
         self.assertEqual(1, len(diagnostics['resolvedHooks']))
         self.assertEqual(3, len(diagnostics['records']))
 
     def test_absent_logs_are_not_proof_of_injection_failure(self):
-        diagnostics = runtime.smoke.hook_diagnostics('ActivityManager installed WeChatPad\n')
+        diagnostics = runtime.smoke.hook_diagnostics('ActivityManager installed ImPad\n')
         self.assertEqual('NOT_OBSERVED', diagnostics['moduleLoaded'])
         self.assertEqual('NOT_OBSERVED', diagnostics['hookInstallation'])
 

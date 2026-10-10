@@ -60,7 +60,7 @@ def initialize(directory, root, serial):
     runtime_instructions.parent.mkdir(parents=True, exist_ok=True)
     runtime_instructions.write_text(json.dumps({
         'appId': policy.app_id, 'serial': serial, 'baseline': policy.runtime_baseline,
-        'instructions': f'Run adb app-launch to restore the managed runtime configuration and start {policy.package_name}. After adding the profile, run wechatpad-build for guarded host checks/tests/build; do not retry Gradle inside the network-disabled sandbox. Build logs are under work/analysis/host-build. Use adb device commands to inspect the disposable AVD. Interrupted requests are cancelled by the relay. Independent runtime verification runs after every completed turn.'}, indent=2))
+        'instructions': f'Run adb app-launch to restore the managed runtime configuration and start {policy.package_name}. After adding the profile, run impad-build for guarded host checks/tests/build; do not retry Gradle inside the network-disabled sandbox. Build logs are under work/analysis/host-build. Use adb device commands to inspect the disposable AVD. Interrupted requests are cancelled by the relay. Independent runtime verification runs after every completed turn.'}, indent=2))
 
 
 def verify_runtime(directory):

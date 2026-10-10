@@ -86,7 +86,7 @@ def merge_cpio(data):
 class Backend:
     def __init__(self, work, serial):
         self.work, self.serial = work, serial
-        self.remote = '/data/local/tmp/wechatpad-ramdisk-build-' + uuid.uuid4().hex
+        self.remote = '/data/local/tmp/impad-ramdisk-build-' + uuid.uuid4().hex
         self.created = False
         if serial:
             if not serial.startswith('emulator-'):
@@ -143,7 +143,7 @@ def build(args):
         raise ValueError('Output directory must be empty')
     args.output.mkdir(parents=True, exist_ok=True)
     args.cache.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix='wechatpad-ramdisk-') as folder:
+    with tempfile.TemporaryDirectory(prefix='impad-ramdisk-') as folder:
         work = Path(folder)
         backend = Backend(work, args.serial)
         try:

@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "WeChatPad"
+rootProject.name = "ImPad"
 include(":app", ":compat-core", ":compat-checker")

@@ -29,7 +29,7 @@ with open('events', 'a') as log:
 active.unlink()
 ''')
             real.chmod(0o755)
-            environment = dict(os.environ, WECHATPAD_JADX_LOCK=str(root / 'lock'),
+            environment = dict(os.environ, IMPAD_JADX_LOCK=str(root / 'lock'),
                                JAVA_OPTS='-Xmx99g', JADX_OPTS='-Xmx99g')
             children = [subprocess.Popen([str(launcher), '--help'], cwd=root, env=environment)
                         for _ in range(2)]
@@ -42,7 +42,7 @@ active.unlink()
 
     def test_unconfigured_lock_fails_before_launch(self):
         environment = dict(os.environ)
-        environment.pop('WECHATPAD_JADX_LOCK', None)
+        environment.pop('IMPAD_JADX_LOCK', None)
         result = subprocess.run(['bash', 'scripts/ci/jadx-serial.sh', '--help'], env=environment,
                                 capture_output=True)
         self.assertNotEqual(0, result.returncode)

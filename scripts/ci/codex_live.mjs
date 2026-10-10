@@ -84,7 +84,7 @@ export async function run(core) {
       await copyFile(path.join(chunks, name), target);
       files.push(target);
     }
-    await artifacts.uploadArtifact(`${process.env.ARTIFACT_PREFIX || 'wechatpad'}-${process.env.APP_ID || 'wechat'}-codex-live-${process.env.GITHUB_RUN_ATTEMPT}-${sequence}`, files, root, {retentionDays: 14});
+    await artifacts.uploadArtifact(`${process.env.ARTIFACT_PREFIX || 'impad'}-${process.env.APP_ID || 'wechat'}-codex-live-${process.env.GITHUB_RUN_ATTEMPT}-${sequence}`, files, root, {retentionDays: 14});
     names.forEach(name => uploaded.add(name));
     core.info(`Saved live diagnostics ${sequence}; ${names.length} encrypted conversation chunks.`);
   }

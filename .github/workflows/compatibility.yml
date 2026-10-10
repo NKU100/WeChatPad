@@ -238,7 +238,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .cache/${{ matrix.target.app_id }}-apks/${{ matrix.target.sha256 }}.apk
-          key: wechatpad-${{ matrix.target.app_id }}-${{ matrix.target.package_name }}-${{ matrix.target.abi }}-apk-${{ matrix.target.sha256 }}
+          key: impad-${{ matrix.target.app_id }}-${{ matrix.target.package_name }}-${{ matrix.target.abi }}-apk-${{ matrix.target.sha256 }}
 
       - name: Download and verify official APK
         env:
@@ -261,7 +261,7 @@ jobs:
           fi
 
           echo 'Downloading the APK from the Tencent CDN.' | tee -a "$report"
-          download_path="$RUNNER_TEMP/wechatpad-$WECHAT_APK_SHA256.apk"
+          download_path="$RUNNER_TEMP/impad-$WECHAT_APK_SHA256.apk"
           if ! curl --fail --show-error --silent --location --retry 3 \
             --connect-timeout 20 --max-time 600 \
             --proto '=https' --proto-redir '=https' \
@@ -485,7 +485,7 @@ jobs:
       needs.latest.result == 'success' && needs.latest.outputs.adaptation_eligible == 'true'
     runs-on: ubuntu-latest
     concurrency:
-      group: wechatpad-codex-managed-auth
+      group: impad-codex-managed-auth
       cancel-in-progress: false
     outputs:
       pipeline_status: ${{ steps.publish.outputs.pipeline_status || steps.adaptation-failure.outputs.pipeline_status }}
@@ -531,8 +531,8 @@ jobs:
 
       - name: Freeze adaptation controller outside agent checkout
         run: |
-          CONTROLLER_ROOT="$RUNNER_TEMP/wechatpad-trusted"
-          CODEX_TASK_DIR="$RUNNER_TEMP/wechatpad-adaptation"
+          CONTROLLER_ROOT="$RUNNER_TEMP/impad-trusted"
+          CODEX_TASK_DIR="$RUNNER_TEMP/impad-adaptation"
           mkdir -p "$CONTROLLER_ROOT" "$CODEX_TASK_DIR"
           {
             echo "CONTROLLER_ROOT=$CONTROLLER_ROOT"
@@ -630,8 +630,8 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .cache/${{ needs.prepare.outputs.app_id }}-apks
-          key: wechatpad-${{ needs.prepare.outputs.app_id }}-regression-${{ hashFiles(needs.prepare.outputs.targets_path) }}
-          restore-keys: wechatpad-${{ needs.prepare.outputs.app_id }}-regression-
+          key: impad-${{ needs.prepare.outputs.app_id }}-regression-${{ hashFiles(needs.prepare.outputs.targets_path) }}
+          restore-keys: impad-${{ needs.prepare.outputs.app_id }}-regression-
 
       - name: Revalidate candidate cache and prepare isolated checkout
         if: steps.claim.outputs.claimed == 'true'
@@ -658,7 +658,7 @@ jobs:
         id: restore-auth
         env:
           CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
-          CODEX_HOME: ${{ runner.temp }}/wechatpad-codex-auth
+          CODEX_HOME: ${{ runner.temp }}/impad-codex-auth
         run: |
           python3 - <<'PY'
           import json, os
@@ -700,7 +700,7 @@ jobs:
       - name: Adapt through a verified Codex goal with disposable AVD
         if: steps.claim.outputs.claimed == 'true'
         env:
-          CODEX_HOME: ${{ runner.temp }}/wechatpad-codex-auth
+          CODEX_HOME: ${{ runner.temp }}/impad-codex-auth
           GOAL_TOKEN_BUDGET: ${{ inputs.goal_token_budget || '500000' }}
           CODEX_TRACE_RECIPIENT: ${{ vars.CODEX_TRACE_RECIPIENT }}
         uses: reactivecircus/android-emulator-runner@v2
@@ -727,7 +727,7 @@ jobs:
         if: always() && steps.restore-auth.outcome == 'success'
         id: persist-auth
         env:
-          CODEX_HOME: ${{ runner.temp }}/wechatpad-codex-auth
+          CODEX_HOME: ${{ runner.temp }}/impad-codex-auth
           GH_TOKEN: ${{ secrets.CODEX_AUTH_WRITE_TOKEN }}
         run: |
           set -euo pipefail
@@ -736,7 +736,7 @@ jobs:
       - name: Remove runner authentication before validation
         if: always() && steps.restore-auth.outcome == 'success'
         env:
-          CODEX_HOME: ${{ runner.temp }}/wechatpad-codex-auth
+          CODEX_HOME: ${{ runner.temp }}/impad-codex-auth
         run: rm -f "$CODEX_HOME/auth.json"
 
       - name: Validate adaptation through shared checker and build
@@ -826,12 +826,12 @@ jobs:
         with:
           name: ${{ needs.prepare.outputs.artifact_prefix }}-${{ needs.prepare.outputs.app_id }}-codex-adaptation
           path: |
-            ${{ runner.temp }}/wechatpad-adaptation/candidate-report.json
-            ${{ runner.temp }}/wechatpad-adaptation/adaptation.patch
-            ${{ runner.temp }}/wechatpad-adaptation/goal-diagnostics.json
-            ${{ runner.temp }}/wechatpad-adaptation/session.jsonl.age
-            ${{ runner.temp }}/wechatpad-adaptation/trace-chunks/*.age
-            ${{ runner.temp }}/wechatpad-adaptation/runtime-report.json
+            ${{ runner.temp }}/impad-adaptation/candidate-report.json
+            ${{ runner.temp }}/impad-adaptation/adaptation.patch
+            ${{ runner.temp }}/impad-adaptation/goal-diagnostics.json
+            ${{ runner.temp }}/impad-adaptation/session.jsonl.age
+            ${{ runner.temp }}/impad-adaptation/trace-chunks/*.age
+            ${{ runner.temp }}/impad-adaptation/runtime-report.json
           if-no-files-found: warn
           retention-days: 14
 

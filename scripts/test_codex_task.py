@@ -8,10 +8,10 @@ from unittest.mock import patch
 from scripts.ci.codex_task import existing_attempt, retry_allowed, claim
 
 
-def record(status='NEEDS_HOOK_REVIEW'):
+def record(status='NEEDS_HOOK_REVIEW', label='impad-adaptation', marker='impad-adaptation'):
     return {'number': 3, 'state': 'closed', 'user': {'login': 'github-actions[bot]', 'type': 'Bot'},
-            'labels': [{'name': 'wechatpad-adaptation'}],
-            'body': '<!-- wechatpad-adaptation:3200-abc -->\nStatus: `' + status + '`'}
+            'labels': [{'name': label}],
+            'body': f'<!-- {marker}:3200-abc -->\nStatus: `{status}`'}
 
 
 def candidate_report():
@@ -34,6 +34,11 @@ class CodexTaskTest(unittest.TestCase):
     def test_closed_failed_attempt_prevents_automatic_retry(self):
         issue = record()
         self.assertEqual(issue, existing_attempt([issue], '3200-abc'))
+
+    def test_legacy_label_and_marker_still_match_the_full_candidate_key(self):
+        issue = record(label='wechatpad-adaptation', marker='wechatpad-adaptation')
+        self.assertEqual(issue, existing_attempt([issue], '3200-abc'))
+        self.assertIsNone(existing_attempt([issue], '3200-ab'))
 
     def test_untrusted_author_missing_label_and_pr_are_ignored(self):
         for change in [{'user': {'login': 'stranger', 'type': 'User'}}, {'labels': []}, {'pull_request': {}}]:
@@ -68,6 +73,99 @@ class CodexTaskTest(unittest.TestCase):
                 self.assertIn('claimed=' + str(retry).lower(), output.read_text())
                 self.assertFalse(any(call[:2] == ('issue', 'create') for call in calls))
                 self.assertEqual(retry, any(call[:2] == ('issue', 'reopen') for call in calls))
+
+    def test_legacy_attempt_is_reused_without_automatic_model_run(self):
+        issue = record(label='wechatpad-adaptation', marker='wechatpad-adaptation')
+        calls = []
+        def fake_gh(*args):
+            calls.append(args)
+            return json.dumps([[issue]]) if args[:2] == ('api', '--paginate') else ''
+        with tempfile.TemporaryDirectory() as root:
+            output = Path(root) / 'output'
+            with patch('scripts.ci.codex_task.eligible_candidate', return_value=True), \
+                    patch('scripts.ci.codex_task.candidate_key', return_value='3200-abc'), \
+                    patch('scripts.ci.codex_task.gh', side_effect=fake_gh), \
+                    patch.dict(os.environ, {'GITHUB_OUTPUT': str(output)}):
+                claim('owner/repo', candidate_report(), [], Path(root), 'run', retry=False)
+            self.assertIn('claimed=false', output.read_text())
+            self.assertIn('issue=3', output.read_text())
+            self.assertFalse(any(call[:2] == ('issue', 'create') for call in calls))
+
+    def test_explicit_retry_reuses_legacy_attempt_and_keeps_retry_policy(self):
+        issue = record(status='WAITING_RUNTIME', label='wechatpad-adaptation', marker='wechatpad-adaptation')
+        calls = []
+        def fake_gh(*args):
+            calls.append(args)
+            return json.dumps([[issue]]) if args[:2] == ('api', '--paginate') else ''
+        with tempfile.TemporaryDirectory() as root:
+            output = Path(root) / 'output'
+            with patch('scripts.ci.codex_task.eligible_candidate', return_value=True), \
+                    patch('scripts.ci.codex_task.candidate_key', return_value='3200-abc'), \
+                    patch('scripts.ci.codex_task.gh', side_effect=fake_gh), \
+                    patch('scripts.ci.codex_task.issue_body', return_value='running'), \
+                    patch.dict(os.environ, {'GITHUB_OUTPUT': str(output)}):
+                claim('owner/repo', candidate_report(), [], Path(root), 'run', retry=True)
+            self.assertIn('claimed=true', output.read_text())
+            self.assertTrue(any(call[:2] == ('issue', 'edit') for call in calls))
+            self.assertFalse(any(call[:2] == ('issue', 'create') for call in calls))
+
+    def test_renamed_repo_accepts_failed_run_url_from_legacy_repo(self):
+        issue = record(status='ADAPTATION_RUNNING', label='wechatpad-adaptation', marker='wechatpad-adaptation')
+        issue['body'] += '\nRun: https://github.com/NKU100/WeChatPad/actions/runs/12345\n'
+        calls = []
+        def fake_gh(*args):
+            calls.append(args)
+            if args[:2] == ('api', '--paginate'):
+                return json.dumps([[issue]])
+            if args[:2] == ('api', 'repos/NKU100/ImPad/actions/runs/12345'):
+                return json.dumps({'status': 'completed', 'conclusion': 'failure'})
+            return ''
+        with tempfile.TemporaryDirectory() as root:
+            output = Path(root) / 'output'
+            with patch('scripts.ci.codex_task.eligible_candidate', return_value=True), \
+                    patch('scripts.ci.codex_task.candidate_key', return_value='3200-abc'), \
+                    patch('scripts.ci.codex_task.gh', side_effect=fake_gh), \
+                    patch('scripts.ci.codex_task.issue_body', return_value='running'), \
+                    patch.dict(os.environ, {'GITHUB_OUTPUT': str(output)}):
+                claim('NKU100/ImPad', candidate_report(), [], Path(root), 'run', retry=True)
+            self.assertIn('claimed=true', output.read_text())
+            self.assertTrue(any(call[:2] == ('api', 'repos/NKU100/ImPad/actions/runs/12345') for call in calls))
+            self.assertTrue(any(call[:2] == ('issue', 'reopen') for call in calls))
+            self.assertFalse(any(call[:2] == ('issue', 'create') for call in calls))
+
+    def test_retry_rejects_action_run_url_from_unrelated_repository(self):
+        issue = record(status='ADAPTATION_RUNNING', label='wechatpad-adaptation', marker='wechatpad-adaptation')
+        issue['body'] += '\nRun: https://github.com/Other/WeChatPad/actions/runs/12345\n'
+        calls = []
+        def fake_gh(*args):
+            calls.append(args)
+            return json.dumps([[issue]]) if args[:2] == ('api', '--paginate') else ''
+        with tempfile.TemporaryDirectory() as root:
+            output = Path(root) / 'output'
+            with patch('scripts.ci.codex_task.eligible_candidate', return_value=True), \
+                    patch('scripts.ci.codex_task.candidate_key', return_value='3200-abc'), \
+                    patch('scripts.ci.codex_task.gh', side_effect=fake_gh), \
+                    patch('scripts.ci.codex_task.issue_body', return_value='running'), \
+                    patch.dict(os.environ, {'GITHUB_OUTPUT': str(output)}):
+                claim('NKU100/ImPad', candidate_report(), [], Path(root), 'run', retry=True)
+            self.assertIn('claimed=false', output.read_text())
+            self.assertFalse(any(call[:2] == ('api', 'repos/NKU100/ImPad/actions/runs/12345') for call in calls))
+            self.assertFalse(any(call[:2] == ('issue', 'create') or call[:2] == ('issue', 'reopen') for call in calls))
+
+    def test_conflicting_legacy_and_current_records_fail_closed(self):
+        issues = [record(), record(label='wechatpad-adaptation', marker='wechatpad-adaptation')]
+        calls = []
+        def fake_gh(*args):
+            calls.append(args)
+            return json.dumps([issues]) if args[:2] == ('api', '--paginate') else ''
+        with tempfile.TemporaryDirectory() as root:
+            with patch('scripts.ci.codex_task.eligible_candidate', return_value=True), \
+                    patch('scripts.ci.codex_task.candidate_key', return_value='3200-abc'), \
+                    patch('scripts.ci.codex_task.gh', side_effect=fake_gh), \
+                    patch.dict(os.environ, {'GITHUB_OUTPUT': str(Path(root) / 'output')}), \
+                    self.assertRaisesRegex(ValueError, 'Multiple trusted adaptation records'):
+                claim('owner/repo', candidate_report(), [], Path(root), 'run')
+        self.assertFalse(any(call[:2] == ('issue', 'create') or call[:2] == ('label', 'create') for call in calls))
 
     def test_pending_pr_explicit_retry_starts_new_attempt(self):
         issue = record('WAITING_RUNTIME')

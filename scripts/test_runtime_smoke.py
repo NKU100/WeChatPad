@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 import sys
 import zipfile
+import xml.etree.ElementTree as ET
 from contextlib import ExitStack, redirect_stdout
 import io
 
@@ -16,6 +17,18 @@ spec.loader.exec_module(smoke)
 
 
 class UiEvidenceTest(unittest.TestCase):
+    def test_module_package_scope_entry_and_display_metadata(self):
+        root = Path(__file__).resolve().parents[1]
+        resources = ET.parse(root / 'app/src/main/res/values/strings.xml').getroot()
+        strings = {entry.get('name'): ''.join(entry.itertext()) for entry in resources.findall('string')}
+        self.assertEqual(smoke.MODULE, 'io.github.nku100.impad')
+        self.assertEqual(strings['app_name'], "I\\'m Pad")
+        self.assertEqual(strings['app_description'], '微信、QQ、企业微信的平板登录适配模块')
+        self.assertEqual((root / 'app/src/main/resources/META-INF/xposed/java_init.list').read_text().strip(),
+                         'io.github.nku100.impad.ImPadModule')
+        self.assertEqual((root / 'app/src/main/resources/META-INF/xposed/scope.list').read_text().splitlines(),
+                         ['com.tencent.mm'])
+
     def test_script_help_imports_from_clean_environment(self):
         environment = os.environ.copy()
         environment.pop('PYTHONPATH', None)
@@ -64,7 +77,12 @@ class UiEvidenceTest(unittest.TestCase):
         with ExitStack() as stack:
             folder = stack.enter_context(tempfile.TemporaryDirectory())
             stack.enter_context(patch.object(smoke, 'EVIDENCE', Path(folder)))
-            stack.enter_context(patch.object(smoke, 'adb', side_effect=lambda *args, **kwargs: (events.append(args), result)[1]))
+            def device(*args, **kwargs):
+                events.append(args)
+                if args == ('shell', 'pm', 'path', smoke.MODULE):
+                    return subprocess.CompletedProcess([], 0, b'package:/data/app/io.github.nku100.impad/base.apk\n', b'')
+                return result
+            stack.enter_context(patch.object(smoke, 'adb', side_effect=device))
             stack.enter_context(patch.object(smoke, 'su', return_value=result))
             stack.enter_context(patch.object(smoke, 'save'))
             stack.enter_context(patch.object(smoke, 'mobile_input', return_value='<hierarchy />'))
@@ -88,12 +106,23 @@ class UiEvidenceTest(unittest.TestCase):
 
     def test_ocr_target_requires_unique_confident_text(self):
         tsv = 'level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n'
-        line = '5\t1\t1\t1\t1\t1\t50\t70\t140\t30\t96\tWeChatPad\n'
-        target = smoke.ocr_target(tsv + line, 'WeChatPad')
+        line = '5\t1\t1\t1\t1\t1\t50\t70\t140\t30\t96\tImPad\n'
+        target = smoke.ocr_target(tsv + line, 'ImPad')
         self.assertEqual(target.get('bounds'), '[50,70][190,100]')
-        self.assertIsNone(smoke.ocr_target(tsv + line.replace('96', '20'), 'WeChatPad'))
+        self.assertIsNone(smoke.ocr_target(tsv + line.replace('96', '20'), 'ImPad'))
         with self.assertRaisesRegex(ValueError, 'ambiguous'):
-            smoke.ocr_target(tsv + line + line.replace('5\t1\t1\t1\t1\t1', '5\t1\t2\t1\t1\t1'), 'WeChatPad')
+            smoke.ocr_target(tsv + line + line.replace('5\t1\t1\t1\t1\t1', '5\t1\t2\t1\t1\t1'), 'ImPad')
+
+    def test_ocr_target_matches_multiword_module_label_with_apostrophe(self):
+        tsv = 'level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n'
+        line = (
+            '5\t1\t1\t1\t1\t1\t20\t40\t12\t24\t95\tI\n'
+            '5\t1\t1\t1\t1\t2\t34\t40\t25\t24\t93\tm\n'
+            '5\t1\t1\t1\t1\t3\t65\t40\t48\t24\t96\tPad\n'
+        )
+        target = smoke.ocr_target(tsv + line, smoke.MODULE_LABEL)
+        self.assertEqual(target.get('text'), 'I m Pad')
+        self.assertEqual(target.get('bounds'), '[20,40][113,64]')
 
     def test_tablet_only_selector_is_navigation_not_final_success(self):
         ui = '<hierarchy><node package="com.tencent.mm" text="Log in on Tablet Only" bounds="[0,0][100,100]" /></hierarchy>'

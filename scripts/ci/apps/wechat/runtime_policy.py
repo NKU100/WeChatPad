@@ -42,7 +42,7 @@ def qr_page_ready(activity, xml, package_name, page_activity):
 
 def hook_diagnostics(logs):
     records = [line for line in logs.splitlines()
-               if "WeChatPad" in line and "process skipped:" not in line
+               if "ImPad" in line and "process skipped:" not in line
                and any(marker in line for marker in ["status=", "waiting for Tinker",
                                                        "resolved tablet=", hook_installation_log])]
     compatible = any("status=COMPATIBLE" in line for line in records)

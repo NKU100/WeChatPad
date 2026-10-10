@@ -73,7 +73,7 @@ class AppServer:
             self.process = subprocess.Popen(command,
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.stderr,
                 text=True, env=env, start_new_session=True)
-            self.request('initialize', {'clientInfo': {'name': 'wechatpad_ci', 'version': '1'},
+            self.request('initialize', {'clientInfo': {'name': 'impad_ci', 'version': '1'},
                                         'capabilities': {'experimentalApi': True}})
             self.send({'method': 'initialized'})
         except Exception:

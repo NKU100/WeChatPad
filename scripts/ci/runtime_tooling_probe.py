@@ -23,7 +23,7 @@ def main():
     subprocess.run(['adb','-s','emulator-5554','wait-for-device'],env=env,check=True,timeout=120)
     (task/'state.json').write_text(json.dumps({'appId':os.environ.get('APP_ID', 'wechat'),'worktree':str(workspace),'runtime':{'socket':str(socket),'serial':'emulator-5554'}}))
     relay = DeviceRelay(task,env)
-    env['WECHATPAD_ADB_RELAY'] = str(relay.root)
+    env['IMPAD_ADB_RELAY'] = str(relay.root)
     wrapper = str(Path('scripts/ci/adb-device.sh').resolve())
     try:
         subprocess.run(['bash',wrapper,'app-launch'],cwd=workspace,env=env,check=True,timeout=180)

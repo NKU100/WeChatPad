@@ -1,4 +1,4 @@
 <resources>
-    <string name="app_name">WeChatPad</string>
-    <string name="app_description">Enable the tablet login option in WeChat.</string>
+    <string name="app_name">I\'m Pad</string>
+    <string name="app_description">微信、QQ、企业微信的平板登录适配模块</string>
 </resources>
