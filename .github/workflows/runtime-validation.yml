@@ -37,6 +37,7 @@ jobs:
     env:
       APP_ID: ${{ inputs.app_id || 'wechat' }}
       CANDIDATE_MODE: ${{ inputs.candidate_mode || 'latest' }}
+      APK_SHA256: ${{ inputs.apk_sha256 }}
     steps:
       - uses: actions/checkout@v7
       - name: Resolve trusted application policy
@@ -54,11 +55,19 @@ jobs:
         run: sdkmanager 'platforms;android-37.2' 'build-tools;37.0.0'
       - name: Prepare registered replay candidate
         run: |
+          selector_args=()
+          if [[ -n "$APK_SHA256" ]]; then
+            if [[ ! "$APK_SHA256" =~ ^[[:xdigit:]]{64}$ ]]; then
+              echo 'apk_sha256 must be 64 hexadecimal characters' >&2
+              exit 2
+            fi
+            selector_args=(--apk-sha256 "$APK_SHA256")
+          fi
           python3 -m scripts.ci.candidate_selection \
             --app-id "$APP_ID" \
             --mode "$CANDIDATE_MODE" \
             --targets "$TARGETS_PATH" \
-            --apk-sha256 "${{ inputs.apk_sha256 || '' }}" \
+            "${selector_args[@]}" \
             --directory runtime-inputs
       - name: Check real APK and build replay module
         run: |

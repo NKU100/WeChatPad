@@ -395,9 +395,18 @@ jobs:
           WECHAT_APK_URL: ${{ needs.prepare.outputs.source_url }}
           WECHAT_TARGET_MATRIX: ${{ needs.prepare.outputs.targets }}
           WECHAT_REGRESSION_PASSED: ${{ needs.check.result != 'failure' && needs.check.result != 'cancelled' }}
+          BASELINE_APK_SHA256: ${{ inputs.baseline_apk_sha256 }}
         shell: bash
         run: |
           set -euo pipefail
+          baseline_args=''
+          if [[ -n "$BASELINE_APK_SHA256" ]]; then
+            if [[ ! "$BASELINE_APK_SHA256" =~ ^[[:xdigit:]]{64}$ ]]; then
+              echo 'baseline_apk_sha256 must be 64 hexadecimal characters' >&2
+              exit 2
+            fi
+            baseline_args="--baseline-apk-sha256 $BASELINE_APK_SHA256"
+          fi
           checked_versions="$(jq -r '[.[].version_name] | join(",")' <<< "$WECHAT_TARGET_MATRIX")"
           if [[ "$GITHUB_REF" == 'refs/heads/main' ]]; then
             profile_merged_to_main=true
@@ -406,7 +415,7 @@ jobs:
           fi
 
           ./gradlew --no-daemon :compat-checker:run \
-            --args="analyze-candidate --app-id $APP_ID --targets $TARGETS_PATH --apk '$WECHAT_APK_PATH' --source-url '$WECHAT_APK_URL' --checked-versions '$checked_versions' --regression-passed '$WECHAT_REGRESSION_PASSED' --profile-merged-to-main '$profile_merged_to_main' --baseline-apk-sha256 '${{ inputs.baseline_apk_sha256 || '' }}' --report compatibility-report/candidate-report.json" \
+            --args="analyze-candidate --app-id $APP_ID --targets $TARGETS_PATH --apk '$WECHAT_APK_PATH' --source-url '$WECHAT_APK_URL' --checked-versions '$checked_versions' --regression-passed '$WECHAT_REGRESSION_PASSED' --profile-merged-to-main '$profile_merged_to_main' $baseline_args --report compatibility-report/candidate-report.json" \
             2>&1 | tee -a compatibility-report/latest-official.md
 
       - name: Determine whether Codex should adapt this build
