@@ -2,6 +2,7 @@ package io.github.nku100.wechatpad.compat
 
 import java.io.File
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
@@ -36,13 +37,73 @@ class AppCompatibilityPolicyTest {
     }
 
     @Test
-    fun registeredWeChatPolicyAcceptsTheUnmodifiedProductionManifest() {
-        val manifest = listOf(File("compatibility/wechat/targets.json"), File("../compatibility/wechat/targets.json"))
-            .firstOrNull(File::isFile)
-        assertNotNull(manifest, "Production WeChat targets are available to core tests")
-        val targets = Json.decodeFromString<List<CompatibilityTarget>>(manifest.readText())
+    fun registeredWeChatPolicyValidatesTheProductionManifestAndRetainsTheOriginalProfile() {
+        val targets = productionTargets()
         AppCompatibilityPolicies.require("wechat").validateTargets(targets)
-        assertNotNull(targets.singleOrNull { it.identity.versionName == "8.0.79" })
+        assertNotNull(targets.singleOrNull {
+            it.identity.packageName == "com.tencent.mm" &&
+                it.identity.abi == "arm64-v8a" &&
+                it.identity.versionCode == 3200L &&
+                it.identity.apkSha256 == ORIGINAL_8_0_79_SHA256
+        })
+    }
+
+    @Test
+    fun productionManifestRetainsExistingProfilesWhenAddingSameCodeRepack() {
+        val targets = productionTargets()
+        val original = targets.single {
+            it.identity.packageName == "com.tencent.mm" &&
+                it.identity.abi == "arm64-v8a" &&
+                it.identity.versionCode == 3200L &&
+                it.identity.apkSha256 == ORIGINAL_8_0_79_SHA256
+        }
+        val originalCodeProfiles = targets.filter {
+            it.identity.packageName == original.identity.packageName &&
+                it.identity.abi == original.identity.abi &&
+                it.identity.versionCode == original.identity.versionCode
+        }
+        val originalDigests = originalCodeProfiles.map { requireNotNull(it.identity.apkSha256).lowercase() }.toSet()
+        val existingVariantDigest = nextDigest(originalDigests)
+        val existingVariant = original.copy(identity = original.identity.copy(apkSha256 = existingVariantDigest))
+        val profilesWithExistingVariant = targets + existingVariant
+        val beforeProfiles = profilesWithExistingVariant.filter {
+            it.identity.packageName == original.identity.packageName &&
+                it.identity.abi == original.identity.abi &&
+                it.identity.versionCode == original.identity.versionCode
+        }
+        val beforeDigests = beforeProfiles.map { requireNotNull(it.identity.apkSha256).lowercase() }.toSet()
+        val repackDigest = nextDigest(beforeDigests)
+        val repack = original.copy(identity = original.identity.copy(apkSha256 = repackDigest))
+        val profiles = profilesWithExistingVariant + repack
+
+        AppCompatibilityPolicies.require("wechat").validateTargets(profiles)
+
+        val sameVersionProfiles = profiles.filter {
+            it.identity.packageName == original.identity.packageName &&
+                it.identity.abi == original.identity.abi &&
+                it.identity.versionCode == original.identity.versionCode
+        }
+        val resultingDigests = sameVersionProfiles.map { requireNotNull(it.identity.apkSha256).lowercase() }.toSet()
+        assertEquals(beforeProfiles.size + 1, sameVersionProfiles.size)
+        assertEquals(beforeDigests + repackDigest, resultingDigests)
+        assertNotNull(sameVersionProfiles.singleOrNull {
+            it.identity.packageName == original.identity.packageName &&
+                it.identity.abi == original.identity.abi &&
+                it.identity.versionCode == original.identity.versionCode &&
+                it.identity.apkSha256.equals(ORIGINAL_8_0_79_SHA256, ignoreCase = true)
+        })
+        assertNotNull(sameVersionProfiles.singleOrNull {
+            it.identity.packageName == original.identity.packageName &&
+                it.identity.abi == original.identity.abi &&
+                it.identity.versionCode == original.identity.versionCode &&
+                it.identity.apkSha256.equals(repackDigest, ignoreCase = true)
+        })
+        assertNotNull(sameVersionProfiles.singleOrNull {
+            it.identity.packageName == original.identity.packageName &&
+                it.identity.abi == original.identity.abi &&
+                it.identity.versionCode == original.identity.versionCode &&
+                it.identity.apkSha256.equals(existingVariantDigest, ignoreCase = true)
+        })
     }
 
     @Test
@@ -69,6 +130,17 @@ class AppCompatibilityPolicyTest {
         sourceUrl = "https://dldir1v6.qq.com/weixin/android/repack.apk",
     )
 
+    private fun productionTargets(): List<CompatibilityTarget> {
+        val manifest = listOf(File("compatibility/wechat/targets.json"), File("../compatibility/wechat/targets.json"))
+            .firstOrNull(File::isFile)
+        assertNotNull(manifest, "Production WeChat targets are available to core tests")
+        return Json.decodeFromString(manifest.readText())
+    }
+
+    private fun nextDigest(usedDigests: Set<String>): String = generateSequence(0L) { it + 1 }
+        .map { it.toString(16).padStart(64, '0') }
+        .first { it !in usedDigests }
+
     private fun target() = CompatibilityTarget(
         identity = BuildIdentity(
             packageName = "org.example.testapp",
@@ -89,5 +161,6 @@ class AppCompatibilityPolicyTest {
     private companion object {
         val APK = "a".repeat(64)
         val SIGNER = "b".repeat(64)
+        const val ORIGINAL_8_0_79_SHA256 = "5feb100337981467fd257c3ad66bb171f54a69d2579b2ecc70d5a628db8e7282"
     }
 }
