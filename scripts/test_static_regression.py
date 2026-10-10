@@ -8,7 +8,11 @@ from scripts.ci.static_regression import registered_window, ensure_apk, check_ap
 
 class StaticRegressionTest(unittest.TestCase):
     def test_window_uses_three_highest_supported_builds(self):
-        profiles = [{'identity': {'versionCode': n, 'apkSha256': str(n)}, 'verificationStatus': status}
+        profiles = [{'identity': {'packageName': 'com.tencent.mm', 'abi': 'arm64-v8a', 'versionCode': n,
+                                  'versionName': f'8.0.{n}', 'apkSha256': f'{n:064x}',
+                                  'signerSha256': '0fe4ff85c215918396dadc7cd8ce6963339af33d37751a56e54c7206b63a3c7c'},
+                     'sourceUrl': f'https://dldir1v6.qq.com/weixin/android/test{n}.apk',
+                     'hooks': [{'id': 'tablet'}, {'id': 'login'}], 'verificationStatus': status}
                     for n, status in [(1, 'runtime-verified-local'), (4, 'static-verified'),
                                       (2, 'runtime-verified-hosted'), (3, 'runtime-verified-local'),
                                       (5, 'runtime-verified-hosted')]]
@@ -17,7 +21,7 @@ class StaticRegressionTest(unittest.TestCase):
     def test_cache_is_rehashed_and_corruption_is_rejected(self):
         with tempfile.TemporaryDirectory() as root:
             digest = hashlib.sha256(b'apk').hexdigest()
-            profile = {'identity': {'apkSha256': digest}, 'sourceUrl': 'https://dldir1v6.qq.com/weixin/android/test.apk'}
+            profile = {'identity': {'packageName': 'com.tencent.mm', 'abi': 'arm64-v8a', 'apkSha256': digest}, 'sourceUrl': 'https://dldir1v6.qq.com/weixin/android/test.apk'}
             path = Path(root) / (digest + '.apk')
             path.write_bytes(b'apk')
             self.assertEqual(path, ensure_apk(profile, Path(root)))

@@ -1,13 +1,15 @@
-package io.github.nku100.wechatpad.runtime
+package io.github.nku100.wechatpad.apps.wechat
+
+import io.github.nku100.wechatpad.runtime.HookCall
 
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 
-class HookCallbacksTest {
+class WeChatHookCallbacksTest {
     @Test
     fun tabletDetectionProceedsAndDisablesTabletModeOnlyForChatStack() {
         var originalCalls = 0
-        val callbacks = HookCallbacks(
+        val callbacks = WeChatHookCallbacks(
             stackTraceProvider = {
                 arrayOf(StackTraceElement("com.tencent.mm.pluginsdk.ui.chat.ChatUI", "send", null, 1))
             },
@@ -24,7 +26,7 @@ class HookCallbacksTest {
 
     @Test
     fun tabletDetectionReturnsTrueForNonChatCallers() {
-        val callbacks = HookCallbacks(
+        val callbacks = WeChatHookCallbacks(
             stackTraceProvider = { arrayOf(StackTraceElement("com.tencent.mm.ui.HomeUI", "open", null, 1)) },
         )
         var originalCalls = 0
@@ -40,7 +42,7 @@ class HookCallbacksTest {
 
     @Test
     fun loginEntryChangesOnlyGoneViewsAndPreservesTheOriginalResult() {
-        val callbacks = HookCallbacks(
+        val callbacks = WeChatHookCallbacks(
             isView = { it is TestView },
             visibilityOf = { (it as TestView).visibility },
             setVisibility = { view, visibility -> (view as TestView).visibility = visibility },

@@ -72,12 +72,21 @@ class SelectCompatibilityWindowTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "invalid APK SHA-256"):
             matrix_entries([missing_digest])
 
+    def test_same_version_code_in_other_package_or_abi_does_not_change_window(self):
+        targets = [target("8.0.78", 3180), target("8.0.79", 3200)]
+        targets.append(target("other-8.0.99", 3200, package="org.example.other"))
+        targets.append(target("other-abi-8.0.99", 3200, abi="x86_64"))
+        selected = select_regression_targets(targets, 3220, app_id="wechat", package_name="com.tencent.mm", abi="arm64-v8a")
+        self.assertEqual(["8.0.78", "8.0.79"], version_names(selected))
 
-def target(version_name, version_code, verification_status="runtime-verified-local"):
+
+def target(version_name, version_code, verification_status="runtime-verified-local", package="com.tencent.mm", abi="arm64-v8a"):
     return {
         "identity": {
+            "packageName": package,
             "versionName": version_name,
             "versionCode": version_code,
+            "abi": abi,
         },
         "verificationStatus": verification_status,
     }

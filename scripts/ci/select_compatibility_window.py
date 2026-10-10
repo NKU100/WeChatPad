@@ -2,15 +2,30 @@ import argparse
 import json
 import re
 from pathlib import Path
+from typing import Optional
+
+from scripts.ci.app_policy import get_policy
 
 
 SUPPORTED_STATUSES = {"runtime-verified-local", "runtime-verified-hosted"}
 
 
-def select_regression_targets(targets: list[dict], candidate_version_code: int) -> list[dict]:
+def select_regression_targets(
+    targets: list[dict], candidate_version_code: int, app_id: Optional[str] = None,
+    package_name: Optional[str] = None, abi: Optional[str] = None,
+) -> list[dict]:
     if type(candidate_version_code) is not int or candidate_version_code <= 0:
         raise ValueError("candidate version code must be a positive integer")
 
+    policy = get_policy(app_id)
+    package_name = package_name or policy.package_name
+    if abi is None:
+        compatible_abis = {row.get("identity", {}).get("abi") for row in targets
+                           if row.get("identity", {}).get("packageName") == package_name}
+        compatible_abis.discard(None)
+        if len(compatible_abis) != 1:
+            raise ValueError("Compatibility window requires one explicit package and ABI")
+        abi = compatible_abis.pop()
     seen_version_codes: set[int] = set()
     supported: list[tuple[int, dict]] = []
     for target in targets:
@@ -20,6 +35,9 @@ def select_regression_targets(targets: list[dict], candidate_version_code: int) 
         version_code = identity.get("versionCode")
         if type(version_code) is not int or version_code <= 0:
             raise ValueError("target version code must be a positive integer")
+        target_identity = identity
+        if target_identity.get("packageName") != package_name or target_identity.get("abi") != abi:
+            continue
         if version_code in seen_version_codes:
             raise ValueError(f"duplicate version code in compatibility targets: {version_code}")
         seen_version_codes.add(version_code)
@@ -38,7 +56,7 @@ def select_regression_targets(targets: list[dict], candidate_version_code: int) 
     return predecessors[-2:]
 
 
-def matrix_entries(targets: list[dict]) -> list[dict[str, object]]:
+def matrix_entries(targets: list[dict], app_id: Optional[str] = None) -> list[dict[str, object]]:
     entries = []
     for target in targets:
         identity = target["identity"]
@@ -47,9 +65,16 @@ def matrix_entries(targets: list[dict]) -> list[dict[str, object]]:
         source_url = target.get("sourceUrl", "")
         if not re.fullmatch(r"[a-f0-9]{64}", digest):
             raise ValueError("selected target has an invalid APK SHA-256")
-        if not source_url.startswith("https://dldir1v6.qq.com/weixin/android/") or not source_url.endswith(".apk"):
-            raise ValueError("selected target source URL is outside the official Tencent CDN APK directory")
+        policy = get_policy(app_id if app_id is not None else target.get("appId", "wechat"))
+        if identity.get("packageName") != policy.package_name or identity.get("abi") not in policy.supported_abis:
+            raise ValueError("selected target identity does not match the registered app policy")
+        if not source_url.startswith(policy.official_apk_prefix) or not source_url.endswith(".apk"):
+            raise ValueError("selected target source URL is outside the registered official APK directory")
         entries.append({
+            "app_id": policy.app_id,
+            "artifact_prefix": policy.artifact_prefix,
+            "package_name": identity["packageName"],
+            "abi": identity["abi"],
             "version_name": identity["versionName"],
             "version_code": identity["versionCode"],
             "sha256": digest,
@@ -70,12 +95,16 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--targets", type=Path, required=True)
     parser.add_argument("--candidate-version-code", type=int, required=True)
+    parser.add_argument("--app-id", default="wechat")
+    parser.add_argument("--package-name")
+    parser.add_argument("--abi")
     parser.add_argument("--github-output", type=Path, required=True)
     arguments = parser.parse_args()
 
     targets = json.loads(arguments.targets.read_text(encoding="utf-8"))
-    selected = select_regression_targets(targets, arguments.candidate_version_code)
-    matrix = matrix_entries(selected)
+    selected = select_regression_targets(targets, arguments.candidate_version_code,
+                                         arguments.app_id, arguments.package_name, arguments.abi)
+    matrix = matrix_entries(selected, arguments.app_id)
     append_github_output(arguments.github_output, {
         "matrix": json.dumps(matrix, separators=(",", ":")),
         "regression_versions": ",".join(str(entry["version_name"]) for entry in matrix),

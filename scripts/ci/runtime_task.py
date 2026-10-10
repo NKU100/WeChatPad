@@ -6,22 +6,37 @@ import os
 import subprocess
 from pathlib import Path
 
+from scripts.ci.app_policy import policy_for_report, validate_targets
 from scripts.ci.codex_task import gh, issue_body, write_issue
 from scripts.ci.discover_latest_wechat import append_github_output
 
 
-def runtime_result(report, smoke, conclusion):
+def runtime_result(report, smoke, conclusion, app_id=None):
     if report['status'] != 'STATIC_VERIFIED_PENDING_RUNTIME':
         raise ValueError('Runtime acceptance requires static verification')
+    policy = policy_for_report(report, app_id)
+    identity = report['identity']
+    if identity.get('abi') not in policy.supported_abis:
+        raise ValueError('Candidate ABI does not match the registered app policy')
+    if identity.get('signerSha256', '').lower() != policy.signer_sha256:
+        raise ValueError('Candidate signer does not match the registered app policy')
     result = copy.deepcopy(report)
+    result['appId'] = policy.app_id
     if conclusion in {'cancelled', 'skipped'}:
         result['runtimeConclusion'] = conclusion
         result['blockers'] = ['Hosted runtime smoke did not complete; rerun runtime verification for this exact build.']
         return result
-    verified = (conclusion == 'success' and smoke.get('status') == 'RUNTIME_SMOKE_VERIFIED'
-                and smoke.get('baseline') == 'NO_TABLET_ENTRY' and smoke.get('hooks') == 2
-                and smoke.get('qrPage') == 'LoginAsExDeviceUI'
-                and smoke.get('apkSha256') == report['identity']['apkSha256'])
+    verified = (
+        conclusion == 'success'
+        and smoke.get('status') == 'RUNTIME_SMOKE_VERIFIED'
+        and smoke.get('appId', 'wechat') == policy.app_id
+        and smoke.get('packageName') == policy.package_name
+        and smoke.get('abi') == identity.get('abi')
+        and smoke.get('baseline') == policy.runtime_baseline
+        and smoke.get('hookIds') == list(policy.required_hook_ids)
+        and smoke.get('qrPage') == policy.runtime_qr_page
+        and smoke.get('apkSha256') == identity.get('apkSha256')
+    )
     result['status'] = 'RUNTIME_VERIFIED' if verified else 'RUNTIME_REJECTED'
     result['blockers'] = [] if verified else ['Hosted runtime smoke failed or exact-build evidence is missing.']
     if verified:
@@ -31,6 +46,7 @@ def runtime_result(report, smoke, conclusion):
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--app-id', default='wechat')
     parser.add_argument('--directory', type=Path, required=True)
     parser.add_argument('--smoke', type=Path, required=True)
     parser.add_argument('--conclusion', required=True)
@@ -41,7 +57,7 @@ def main():
     directory = args.directory
     report = json.loads((directory / 'candidate-report.json').read_text())
     smoke = json.loads(args.smoke.read_text()) if args.smoke.is_file() else {}
-    result = runtime_result(report, smoke, args.conclusion)
+    result = runtime_result(report, smoke, args.conclusion, args.app_id)
     repo = os.environ['GITHUB_REPOSITORY']
     run_url = f"https://github.com/{repo}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
     pr = json.loads(gh('pr', 'view', args.pr, '--repo', repo, '--json', 'headRefOid,headRefName,state,body'))
@@ -49,9 +65,10 @@ def main():
         raise ValueError('Adaptation PR changed or closed after the tested build; refusing to promote it')
     if result['status'] == 'RUNTIME_VERIFIED':
         # Read only the manifest from the tested commit; never execute PR scripts with write credentials.
-        manifest = 'compatibility/targets.json'
+        manifest = policy_for_report(report, args.app_id).targets_path
         subprocess.run(['git', 'fetch', 'origin', args.head], check=True)
         targets = json.loads(subprocess.check_output(['git', 'show', f'{args.head}:{manifest}']))
+        validate_targets(targets, args.app_id)
         profile = next(p for p in targets if p['identity'] == report['identity'])
         if profile != report['suggestedProfile']:
             raise ValueError('Tested profile differs from the statically verified report')

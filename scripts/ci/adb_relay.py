@@ -9,8 +9,9 @@ import shlex
 import sys
 import threading
 import time
+from scripts.ci.app_policy import get_policy
 
-COMMANDS = {'wechat-launch', 'verify-build', 'shell', 'exec-out', 'push', 'pull', 'install', 'uninstall', 'logcat',
+COMMANDS = {'app-launch', 'wechat-launch', 'verify-build', 'shell', 'exec-out', 'push', 'pull', 'install', 'uninstall', 'logcat',
             'reboot', 'root', 'unroot', 'wait-for-device', 'get-state', 'version', 'help'}
 
 
@@ -23,7 +24,7 @@ def validate_request(request, workspace):
     cwd = Path(request['cwd']).resolve()
     if not cwd.is_relative_to(workspace):
         raise ValueError('Device command must run inside the adaptation workspace')
-    if args[0] in {'wechat-launch', 'verify-build'} and len(args) != 1:
+    if args[0] in {'app-launch', 'wechat-launch', 'verify-build'} and len(args) != 1:
         raise ValueError('Managed launch/build commands do not accept arguments')
     def local_path(value):
         if not (cwd / value).resolve().is_relative_to(workspace):
@@ -49,6 +50,7 @@ def validate_request(request, workspace):
 class DeviceRelay:
     def __init__(self, directory, env):
         state = json.loads((directory / 'state.json').read_text())
+        self.policy = get_policy(state.get('appId'))
         self.directory = directory.resolve()
         self.workspace = Path(state['worktree']).resolve()
         self.root = self.workspace / 'work/analysis/adb-relay'
@@ -110,12 +112,13 @@ class DeviceRelay:
             return self.execute([sys.executable, str(Path(__file__).with_name('host_build.py')),
                                  str(self.directory)], cwd, request, 900)
         prefix = [self.adb, '-s', self.serial]
-        if args[0] == 'wechat-launch':
+        if args[0] in {'app-launch', 'wechat-launch'}:
+            policy = self.policy if args[0] == 'app-launch' else get_policy('wechat')
             from scripts.ci.runtime_smoke import MAGISK, PAGE_SIZE_BACKCOMPAT_COMMAND
             commands = [prefix + ['wait-for-device'],
                         prefix + ['shell', shlex.join([MAGISK, 'su', '-c', PAGE_SIZE_BACKCOMPAT_COMMAND])],
-                        prefix + ['shell', 'am', 'force-stop', 'com.tencent.mm'],
-                        prefix + ['shell', 'monkey', '-p', 'com.tencent.mm', '-c', 'android.intent.category.LAUNCHER', '1']]
+                        prefix + ['shell', 'am', 'force-stop', policy.package_name],
+                        prefix + ['shell', 'monkey', '-p', policy.package_name, '-c', 'android.intent.category.LAUNCHER', '1']]
             for command in commands:
                 result = self.execute(command, cwd, request, 60)
                 if result[0]:

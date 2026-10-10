@@ -41,7 +41,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: .cache/wechat-apks
-          key: wechatpad-static-apks-${{ hashFiles('compatibility/targets.json') }}
+          key: wechatpad-static-apks-${{ hashFiles('compatibility/wechat/targets.json') }}
           restore-keys: wechatpad-static-apks-
 
       - name: Run registered-build static regression

@@ -45,4 +45,4 @@
 
 ## 结论
 
-两版均完成无模块基线、WeChatPad 注入、平板登录入口可见和二维码页可达的本地冒烟。`compatibility/targets.json` 中两个目标标为 `runtime-verified-local`。本结果只证明客户端登录界面路径可用，不代表微信服务器接受同一账号的多台移动设备会话。
+两版均完成无模块基线、WeChatPad 注入、平板登录入口可见和二维码页可达的本地冒烟。`compatibility/wechat/targets.json` 中两个目标标为 `runtime-verified-local`。本结果只证明客户端登录界面路径可用，不代表微信服务器接受同一账号的多台移动设备会话。

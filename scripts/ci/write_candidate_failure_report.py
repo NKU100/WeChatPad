@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import tempfile
 
+from scripts.ci.app_policy import get_policy
 from scripts.ci.discover_latest_wechat import validate_official_apk_url
 
 
@@ -23,15 +24,17 @@ def write_candidate_failure_report(
     reason: str,
     source_url: str,
     checked_versions: list[str],
+    app_id: str = "wechat",
 ) -> None:
     if status not in FAILURE_STATUSES:
         raise ValueError(f"{status} is not a failure status")
     if source_url:
-        validate_official_apk_url(source_url)
+        validate_official_apk_url(source_url, get_policy(app_id).official_apk_prefix)
     if not reason.strip():
         raise ValueError("failure reason must not be empty")
 
     report = {
+        "appId": get_policy(app_id).app_id,
         "identity": None,
         "sourceUrl": source_url or None,
         "baselineVersion": None,
@@ -68,6 +71,7 @@ def write_candidate_failure_report(
 
 def main() -> int:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--app-id", default="wechat")
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--github-output", type=Path, required=True)
     parser.add_argument("--status", choices=sorted(FAILURE_STATUSES), required=True)
@@ -83,6 +87,7 @@ def main() -> int:
         reason=arguments.reason,
         source_url=arguments.source_url,
         checked_versions=[version for version in arguments.checked_versions.split(",") if version],
+        app_id=arguments.app_id,
     )
     print(f"Pipeline status: {arguments.status}")
     return 0

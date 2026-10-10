@@ -6,6 +6,8 @@ import re
 import sys
 import tempfile
 from pathlib import Path
+
+from scripts.ci.app_policy import get_policy
 from typing import Optional
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
@@ -18,9 +20,10 @@ MAX_APK_BYTES = 1_500_000_000
 CHUNK_SIZE = 1024 * 1024
 
 
-def final_url_is_official(url: str) -> bool:
+def final_url_is_official(url: str, policy=None) -> bool:
     try:
-        validate_official_apk_url(url)
+        selected = policy or get_policy()
+        validate_official_apk_url(url, selected.official_apk_prefix)
         return True
     except ValueError:
         return False
@@ -93,13 +96,13 @@ def header_metadata(headers) -> dict[str, object]:
     }
 
 
-def remote_metadata(url: str) -> dict[str, object]:
+def remote_metadata(url: str, policy=None) -> dict[str, object]:
     request = Request(url, headers={"User-Agent": USER_AGENT}, method="HEAD")
     try:
         with urlopen(request, timeout=30) as response:
             if response.status != 200:
                 raise ValueError(f"Tencent CDN HEAD request returned HTTP {response.status}")
-            if not final_url_is_official(response.geturl()):
+            if not final_url_is_official(response.geturl(), policy):
                 raise ValueError("Tencent CDN HEAD request redirected outside its official APK directory")
             return header_metadata(response.headers)
     except HTTPError as error:
@@ -132,8 +135,10 @@ def download_candidate(
     cache_dir: Path,
     expected_sha256: str,
     remote: dict[str, object],
+    policy=None,
 ) -> tuple[Path, str, bool, dict[str, object]]:
-    validate_official_apk_url(url)
+    selected = policy or get_policy()
+    validate_official_apk_url(url, selected.official_apk_prefix)
     if expected_sha256 and not re.fullmatch(r"[a-f0-9]{64}", expected_sha256):
         raise ValueError("Registered APK SHA-256 must contain 64 lowercase hexadecimal characters")
 
@@ -161,7 +166,7 @@ def download_candidate(
             with urlopen(request, timeout=120) as response:
                 if response.status != 200:
                     raise ValueError(f"Tencent CDN returned HTTP {response.status}")
-                if not final_url_is_official(response.geturl()):
+                if not final_url_is_official(response.geturl(), selected):
                     raise ValueError("Tencent CDN download redirected outside its official APK directory")
                 downloaded_headers = header_metadata(response.headers)
                 remote_length = remote.get("content_length")
@@ -215,20 +220,24 @@ def append_report(path: Path, message: str) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--app-id", default="wechat")
     parser.add_argument("--url", required=True)
     parser.add_argument("--cache-dir", type=Path, required=True)
     parser.add_argument("--expected-sha256", default="")
     parser.add_argument("--github-output", type=Path, required=True)
     parser.add_argument("--report", type=Path, required=True)
     arguments = parser.parse_args()
+    policy = get_policy(arguments.app_id)
 
     try:
-        remote = remote_metadata(arguments.url)
+        validate_official_apk_url(arguments.url, policy.official_apk_prefix)
+        remote = remote_metadata(arguments.url, policy)
         apk_path, actual_sha256, reused, metadata = download_candidate(
             arguments.url,
             arguments.cache_dir,
             arguments.expected_sha256,
             remote,
+            policy,
         )
         append_github_output(arguments.github_output, {
             "apk_path": apk_path.as_posix(),

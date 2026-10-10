@@ -2,34 +2,31 @@ package io.github.nku100.wechatpad.runtime
 
 import java.lang.reflect.Method
 
-class HookInstaller(
-    private val registrar: HookRegistrar,
-    private val callbacks: HookCallbacks = HookCallbacks(),
-) {
-    fun install(tabletMethod: Method, loginMethod: Method): InstallOutcome {
-        var tabletRegistration: HookRegistration? = null
+data class HookSpec(val method: Method, val id: String, val callback: HookCallback)
+
+class HookInstaller(private val registrar: HookRegistrar) {
+    fun install(hooks: List<HookSpec>): InstallOutcome {
+        val registrations = mutableListOf<HookRegistration>()
         return try {
-            tabletRegistration = registrar.hook(tabletMethod, TABLET_HOOK_ID) { call ->
-                callbacks.tabletDetection(call)
+            require(hooks.isNotEmpty()) { "Hook list must not be empty" }
+            require(hooks.all { it.id.isNotBlank() } && hooks.map { it.id }.distinct().size == hooks.size) {
+                "Hook IDs must be non-empty and unique"
             }
-            val loginRegistration = registrar.hook(loginMethod, LOGIN_HOOK_ID) { call ->
-                callbacks.loginEntry(call)
+            for (hook in hooks) {
+                registrations += registrar.hook(hook.method, hook.id, hook.callback)
             }
-            InstallOutcome.Installed(listOf(tabletRegistration, loginRegistration))
+            InstallOutcome.Installed(registrations.toList())
         } catch (error: Throwable) {
-            try {
-                tabletRegistration?.unhook()
-            } catch (rollbackError: Throwable) {
-                error.addSuppressed(rollbackError)
+            for (registration in registrations.asReversed()) {
+                try {
+                    registration.unhook()
+                } catch (rollbackError: Throwable) {
+                    error.addSuppressed(rollbackError)
+                }
             }
             if (error is VirtualMachineError || error is ThreadDeath) throw error
             InstallOutcome.Failed(error.message ?: error.javaClass.simpleName)
         }
-    }
-
-    private companion object {
-        const val TABLET_HOOK_ID = "wechatpad_tablet"
-        const val LOGIN_HOOK_ID = "wechatpad_login"
     }
 }
 

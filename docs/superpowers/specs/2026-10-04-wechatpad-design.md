@@ -50,7 +50,7 @@ libxposed API 102 的 `onPackageLoaded` 在目标 `Application` 创建前执行�
 
 ## 兼容清单与证据
 
-`compatibility/targets.json` 登记每个微信构建的包名、版本名、版本码、渠道/ABI、APK SHA-256、签名证书摘要、Hook 特征版本及验证状态。每个 Hook 还登记 `safeForForwardInference`，只有已验证可跨构建沿用的锚点才允许静态自动推断；默认和未标记值均为 `false`。状态至少区分：
+`compatibility/wechat/targets.json` 登记每个微信构建的包名、版本名、版本码、渠道/ABI、APK SHA-256、签名证书摘要、Hook 特征版本及验证状态。每个 Hook 还登记 `safeForForwardInference`，只有已验证可跨构建沿用的锚点才允许静态自动推断；默认和未标记值均为 `false`。状态至少区分：
 
 - `static-verified`：APK 来源、哈希、签名和共用解析器检查通过。
 - `runtime-verified-hosted`：托管 AVD 确认模块注入、Phone & Tablet 登录入口及稳定二维码页；报告绑定候选 APK 哈希和被测提交，不执行扫码或实际登录。
@@ -92,7 +92,7 @@ DISCOVERED
 
 静态检查器先使用模块共享的 `compat-core` 识别候选 APK。每个 Hook 特征都必须明确声明 `safeForForwardInference`；只有经验证可跨构建沿用的稳定特征才能设为 `true`。未显式标记的特征即使唯一命中，也只报告候选描述符并进入人工检查，避免把同一字符串在新版中的辅助方法误认为 Hook 目标。所有必需 Hook 都能从允许前向推断的稳定特征唯一定位时，适配步骤可以从实际 DEX 事实生成候选构建 profile，包括更新唯一命中的方法描述符。特征缺失、参数/返回形状变化或多重命中时，静态检查器不推测 profile。每个可信未登记构建均由 Codex 适配 worker 在隔离 checkout 提出代码或 profile 改动。自动或模型生成的改动都必须进入 draft PR，并再次通过同一兼容检查器和模块构建 CI；不得直接提交到主分支或自动合并。
 
-常规适配回归窗口最多包含三个构建：若候选是新版本，则为候选 APK 加上 `compatibility/targets.json` 中版本码最高的两个已正式支持构建；若候选已登记，则取按版本码排序后的最新三个正式支持构建。版本重复时去重，登记版本不足三个时检查全部可用版本。窗口外的旧版 profile 仍保留，但不属于每轮候选 CI 的静态回归范围。
+常规适配回归窗口最多包含三个构建：若候选是新版本，则为候选 APK 加上 `compatibility/wechat/targets.json` 中版本码最高的两个已正式支持构建；若候选已登记，则取按版本码排序后的最新三个正式支持构建。版本重复时去重，登记版本不足三个时检查全部可用版本。窗口外的旧版 profile 仍保留，但不属于每轮候选 CI 的静态回归范围。
 
 Codex 适配 worker 使用 GitHub 托管 runner，在主分支手动或定时触发的可信工作流中通过独立的 ChatGPT managed-auth 登录使用订阅用量。每个身份验证通过、尚未登记的新构建都进入 Codex 适配，不再仅限于 `NEEDS_HOOK_REVIEW`。静态检测的锚点推断结果作为分析输入，正式登记仍由经过静态回归的 draft PR 和托管运行时验收完成。
 

@@ -7,6 +7,8 @@ import {pathToFileURL} from 'node:url';
 export async function run(core) {
   const controller = process.env.CONTROLLER_ROOT;
   const task = process.env.CODEX_TASK_DIR;
+  const prompt = process.env.ADAPTATION_PROMPT;
+  if (!prompt) throw new Error('The trusted application policy did not provide an adaptation prompt.');
   const {DefaultArtifactClient} = await import(pathToFileURL(path.join(controller, 'node_modules/@actions/artifact/lib/artifact.js')));
   const artifacts = new DefaultArtifactClient();
   const uploaded = new Set();
@@ -15,7 +17,7 @@ export async function run(core) {
   let stopping = false;
   let signal = null;
   const child = spawn('python3', ['-m', 'scripts.ci.codex_adaptation', 'model',
-    '--directory', task, '--prompt', path.join(controller, 'adapt-wechat.md'),
+    '--directory', task, '--prompt', prompt,
     '--goal-token-budget', process.env.GOAL_TOKEN_BUDGET], {cwd: controller, stdio: 'inherit'});
   const finished = new Promise(resolve => {
     child.once('error', error => resolve({error: String(error)}));
@@ -82,7 +84,7 @@ export async function run(core) {
       await copyFile(path.join(chunks, name), target);
       files.push(target);
     }
-    await artifacts.uploadArtifact(`wechatpad-codex-live-${process.env.GITHUB_RUN_ATTEMPT}-${sequence}`, files, root, {retentionDays: 14});
+    await artifacts.uploadArtifact(`${process.env.ARTIFACT_PREFIX || 'wechatpad'}-${process.env.APP_ID || 'wechat'}-codex-live-${process.env.GITHUB_RUN_ATTEMPT}-${sequence}`, files, root, {retentionDays: 14});
     names.forEach(name => uploaded.add(name));
     core.info(`Saved live diagnostics ${sequence}; ${names.length} encrypted conversation chunks.`);
   }

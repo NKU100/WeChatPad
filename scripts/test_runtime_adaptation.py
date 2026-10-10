@@ -2,15 +2,17 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from dataclasses import replace
 from unittest.mock import patch, MagicMock
 
 from scripts.ci import runtime_adaptation as runtime
 from scripts.ci.codex_adaptation import sha256
+from scripts.ci.app_policy import POLICIES, get_policy
 
 
 class RuntimeAdaptationTest(unittest.TestCase):
     def setUp(self):
-        for name in ['ROOT', 'EVIDENCE', 'stage']:
+        for name in ['ROOT', 'EVIDENCE', 'stage', 'APP_ID', 'APP_POLICY', 'APP_PACKAGE', 'UI_STRATEGY']:
             original = getattr(runtime.smoke, name)
             self.addCleanup(setattr, runtime.smoke, name, original)
 
@@ -21,6 +23,31 @@ class RuntimeAdaptationTest(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'exactly one disposable'):
                     runtime.initialize(Path('/unused'), Path('/unused'), 'emulator-5554')
                 setup.assert_not_called()
+
+    def test_initializer_uses_the_explicit_policy_apk_and_package(self):
+        policy = replace(get_policy('wechat'), app_id='fixture', package_name='org.example.fixture',
+                         supported_abis=('x86_64',), runtime_baseline='FIXTURE_BASELINE',
+                         runtime_qr_page='FixtureQrPage')
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(POLICIES, {'fixture': policy}):
+            root = Path(temporary)
+            directory = root / 'task'; directory.mkdir()
+            worktree = root / 'checkout'; worktree.mkdir()
+            runtime_root = root / 'runtime'; runtime_root.mkdir()
+            (runtime_root / 'fixture.apk').write_bytes(b'app specific apk')
+            report = {'appId': 'fixture', 'identity': {'apkSha256': sha256(runtime_root / 'fixture.apk')}}
+            state = {'appId': 'fixture', 'report': report, 'worktree': str(worktree)}
+            state_path = directory / 'state.json'; state_path.write_text(json.dumps(state))
+            listing = 'List of devices attached\nemulator-5562\tdevice\n'
+            with patch.object(runtime.subprocess, 'check_output', side_effect=[listing, listing]), \
+                 patch.object(runtime.subprocess, 'run') as run_command, \
+                 patch.object(runtime.smoke, 'main', return_value=0) as setup:
+                runtime.initialize(directory, runtime_root, 'emulator-5562')
+            setup.assert_called_once_with(mode='prepare')
+            self.assertEqual('fixture', runtime.smoke.APP_ID)
+            self.assertEqual(3, run_command.call_count)
+            device_instructions = json.loads((worktree / 'work/analysis/runtime-device.json').read_text())
+            self.assertEqual('fixture', device_instructions['appId'])
+            self.assertIn('org.example.fixture', device_instructions['instructions'])
 
     def test_runtime_failure_copies_evidence_for_same_goal_feedback(self):
         with tempfile.TemporaryDirectory() as temporary:

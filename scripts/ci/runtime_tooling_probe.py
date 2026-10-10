@@ -21,12 +21,12 @@ def main():
     subprocess.run(['adb','-L','localfilesystem:'+str(socket),'start-server'],check=True)
     env = dict(os.environ, ADB_SERVER_SOCKET='localfilesystem:'+str(socket))
     subprocess.run(['adb','-s','emulator-5554','wait-for-device'],env=env,check=True,timeout=120)
-    (task/'state.json').write_text(json.dumps({'worktree':str(workspace),'runtime':{'socket':str(socket),'serial':'emulator-5554'}}))
+    (task/'state.json').write_text(json.dumps({'appId':os.environ.get('APP_ID', 'wechat'),'worktree':str(workspace),'runtime':{'socket':str(socket),'serial':'emulator-5554'}}))
     relay = DeviceRelay(task,env)
     env['WECHATPAD_ADB_RELAY'] = str(relay.root)
     wrapper = str(Path('scripts/ci/adb-device.sh').resolve())
     try:
-        subprocess.run(['bash',wrapper,'wechat-launch'],cwd=workspace,env=env,check=True,timeout=180)
+        subprocess.run(['bash',wrapper,'app-launch'],cwd=workspace,env=env,check=True,timeout=180)
         screenshot = subprocess.check_output(['bash',wrapper,'exec-out','screencap','-p'],cwd=workspace,env=env,timeout=45)
         assert screenshot.startswith(b'\x89PNG\r\n\x1a\n'), 'Relay screenshot is not a PNG'
         client = subprocess.Popen(['bash',wrapper,'shell','sleep','30'],cwd=workspace,env=env)

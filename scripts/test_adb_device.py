@@ -36,6 +36,12 @@ class AdbDeviceTest(unittest.TestCase):
             result = subprocess.run(['bash', 'scripts/ci/adb-device.sh', command], env=env, capture_output=True)
             self.assertEqual(2, result.returncode)
 
+    def test_wrapper_allows_managed_app_launch_command(self):
+        env = dict(os.environ, WECHATPAD_ADB_RELAY='/nonexistent-managed-relay')
+        result = subprocess.run(['bash', 'scripts/ci/adb-device.sh', 'app-launch'], env=env, capture_output=True)
+        self.assertNotEqual(2, result.returncode)
+        self.assertNotIn(b'Use a device command', result.stderr)
+
     def test_host_rejects_server_overrides_and_outside_files(self):
         with tempfile.TemporaryDirectory() as temporary:
             workspace = Path(temporary).resolve()

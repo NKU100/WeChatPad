@@ -13,9 +13,11 @@ from scripts.ci.candidate_selection import replay_report, main
 
 class CandidateSelectionTest(unittest.TestCase):
     def setUp(self):
-        self.profile = {'identity': {'versionName': '8.0.78', 'versionCode': 3180,
-                                     'apkSha256': 'a' * 64},
+        self.profile = {'identity': {'packageName': 'com.tencent.mm', 'versionName': '8.0.78', 'versionCode': 3180,
+                                     'abi': 'arm64-v8a', 'apkSha256': 'a' * 64,
+                                     'signerSha256': '0fe4ff85c215918396dadc7cd8ce6963339af33d37751a56e54c7206b63a3c7c'},
                         'sourceUrl': 'https://dldir1v6.qq.com/weixin/android/weixin8078android3180_arm64.apk',
+                        'hooks': [{'id': 'tablet'}, {'id': 'login'}],
                         'verificationStatus': 'runtime-verified-local'}
 
     def test_cli_rejects_explicit_version_selection(self):
@@ -46,7 +48,7 @@ class CandidateSelectionTest(unittest.TestCase):
             root = Path(temporary)
             manifest = root / 'targets.json'
             manifest.write_text(json.dumps([self.profile]))
-            with patch('sys.argv', ['candidate_selection', '--targets', str(manifest), '--directory', str(root / 'inputs')]), patch('scripts.ci.candidate_selection.fetch_official_page', return_value=latest):
+            with patch('sys.argv', ['candidate_selection', '--targets', str(manifest), '--directory', str(root / 'inputs')]), patch('scripts.ci.apps.wechat.discovery_policy.fetch_official_page', return_value=latest):
                 with self.assertRaisesRegex(ValueError, 'Latest official APK is not runtime-verified'):
                     main()
             self.assertFalse((root / 'inputs/wechat.apk').exists())
@@ -65,7 +67,7 @@ class CandidateSelectionTest(unittest.TestCase):
             cache.mkdir()
             (cache / (digest + '.apk')).write_bytes(body)
             (cache / 'candidate.json').write_text(json.dumps(dict(remote, url=profile['sourceUrl'], sha256=digest)))
-            with patch('sys.argv', ['candidate_selection', '--targets', str(manifest), '--directory', str(root)]), patch('scripts.ci.candidate_selection.fetch_official_page', return_value=profile['sourceUrl']), patch('scripts.ci.candidate_selection.remote_metadata', return_value=remote):
+            with patch('sys.argv', ['candidate_selection', '--targets', str(manifest), '--directory', str(root)]), patch('scripts.ci.apps.wechat.discovery_policy.fetch_official_page', return_value=profile['sourceUrl']), patch('scripts.ci.candidate_selection.remote_metadata', return_value=remote):
                 main()
             self.assertEqual((root / 'wechat.apk').read_bytes(), body)
             self.assertEqual(json.loads((root / 'candidate-report.json').read_text())['identity']['versionName'], '8.0.78')

@@ -1,0 +1,46 @@
+import unittest
+from dataclasses import replace
+from unittest.mock import patch
+
+from scripts.ci.app_policy import POLICIES, get_policy, policy_for_report, validate_targets
+from scripts.ci.codex_adaptation import validate_paths
+
+
+class AppPolicyTest(unittest.TestCase):
+    def test_unknown_explicit_app_never_falls_back_to_wechat(self):
+        with self.assertRaisesRegex(ValueError, "Unknown or unregistered appId"):
+            get_policy("qq")
+        with self.assertRaisesRegex(ValueError, "Unknown or unregistered appId"):
+            policy_for_report({"identity": {"packageName": "com.tencent.mm"}}, "qq")
+
+    def test_test_only_second_policy_is_confined_to_its_own_paths(self):
+        test_policy = replace(
+            get_policy("wechat"), app_id="testapp", package_name="org.example.testapp",
+            targets_path="compatibility/testapp/targets.json",
+            app_source_prefix="app/src/main/kotlin/example/testapp/",
+            shared_source_paths=(), artifact_prefix="test-only",
+        )
+        with patch.dict(POLICIES, {"testapp": test_policy}):
+            validate_paths(["compatibility/testapp/targets.json", "app/src/main/kotlin/example/testapp/Adapter.kt"], "testapp")
+            for path in ["compatibility/wechat/targets.json", "app/src/main/kotlin/io/github/nku100/wechatpad/apps/wechat/Adapter.kt"]:
+                with self.subTest(path=path), self.assertRaisesRegex(ValueError, "outside the allowed"):
+                    validate_paths([path], "testapp")
+
+    def test_target_manifest_requires_policy_package_hooks_and_abi(self):
+        target = {
+            "identity": {
+                "packageName": "com.tencent.mm", "abi": "arm64-v8a", "versionCode": 1,
+                "apkSha256": "a" * 64,
+                "signerSha256": get_policy("wechat").signer_sha256,
+            },
+            "sourceUrl": "https://dldir1v6.qq.com/weixin/android/test.apk",
+            "hooks": [{"id": "tablet"}, {"id": "login"}],
+        }
+        validate_targets([target], "wechat")
+        target["identity"]["packageName"] = "org.example.testapp"
+        with self.assertRaisesRegex(ValueError, "package"):
+            validate_targets([target], "wechat")
+
+
+if __name__ == "__main__":
+    unittest.main()

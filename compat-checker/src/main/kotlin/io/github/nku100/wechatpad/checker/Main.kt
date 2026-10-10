@@ -8,6 +8,7 @@ import io.github.nku100.wechatpad.compat.CandidateCompatibilityReport
 import io.github.nku100.wechatpad.compat.CandidatePipelineEvent
 import io.github.nku100.wechatpad.compat.CandidatePipelineStateMachine
 import io.github.nku100.wechatpad.compat.CandidatePipelineStatus
+import io.github.nku100.wechatpad.compat.AppCompatibilityPolicies
 import io.github.nku100.wechatpad.compat.DexFactReader
 import io.github.nku100.wechatpad.compat.VerificationStatus
 import java.io.File
@@ -30,17 +31,20 @@ fun main(args: Array<String>) {
 }
 
 private fun checkCompatibility(arguments: CheckArguments) {
+    val policy = AppCompatibilityPolicies.require(arguments.appId)
     require(arguments.targets.isFile) { "Target file does not exist: ${arguments.targets.absolutePath}" }
     val targets = Json.decodeFromString<List<CompatibilityTarget>>(arguments.targets.readText())
-    require(targets.isNotEmpty()) { "Target file contains no compatibility targets" }
+    policy.validateTargets(targets)
 
     val identity = ApkIdentityInspector().inspect(arguments.apk)
+    policy.validateIdentity(identity)
     val anchors = targets.flatMap { target -> target.hooks.map { it.stringAnchor } }.toSet()
     val facts = DexFactReader.scan(listOf(arguments.apk), anchors)
     val result = CompatibilityResolver.resolveStaticCandidate(
         identity = identity,
         targets = targets,
         facts = facts,
+        requiredHookIds = policy.requiredHookIds,
     )
 
     println("APK: ${arguments.apk.absolutePath}")
@@ -58,27 +62,28 @@ private fun checkCompatibility(arguments: CheckArguments) {
 }
 
 private fun analyzeCandidate(arguments: CandidateArguments) {
+    val policy = AppCompatibilityPolicies.require(arguments.appId)
     require(arguments.targets.isFile) { "Target file does not exist: ${arguments.targets.absolutePath}" }
     require(arguments.apk.isFile) { "APK does not exist: ${arguments.apk.absolutePath}" }
-    require(OFFICIAL_APK_URL.matches(arguments.sourceUrl)) {
-        "Candidate source URL is outside the official Tencent CDN APK directory"
-    }
-
     val targets = Json.decodeFromString<List<CompatibilityTarget>>(arguments.targets.readText())
-    require(targets.isNotEmpty()) { "Target file contains no compatibility targets" }
+    policy.validateTargets(targets)
 
     val identity = ApkIdentityInspector().inspect(arguments.apk)
+    policy.validateIdentity(identity)
+    policy.validateSourceUrl(arguments.sourceUrl)
     val checkedVersions = arguments.checkedVersions
     val matchingTargets = targets.filter {
-        it.identity.versionName == identity.versionName && it.identity.versionCode == identity.versionCode
+        it.identity.packageName == identity.packageName && it.identity.abi == identity.abi &&
+            it.identity.versionName == identity.versionName && it.identity.versionCode == identity.versionCode
     }
-    require(matchingTargets.size <= 1) { "Multiple profiles register this WeChat version" }
+    require(matchingTargets.size <= 1) { "Multiple profiles register this app version" }
 
     val report = matchingTargets.singleOrNull()?.let { target ->
         val facts = DexFactReader.scan(listOf(arguments.apk), target.hooks.map { it.stringAnchor }.toSet())
         CandidateCompatibilityAnalyzer.analyzeRegistered(
             identity = identity,
             target = target,
+            requiredHookIds = policy.requiredHookIds,
             facts = facts,
             checkedVersions = checkedVersions,
             regressionPassed = arguments.regressionPassed,
@@ -89,17 +94,21 @@ private fun analyzeCandidate(arguments: CandidateArguments) {
         val baseline = targets
             .filter {
                 it.verificationStatus.runtimeVerified &&
+                    it.identity.packageName == identity.packageName &&
+                    it.identity.abi == identity.abi &&
+                    it.identity.signerSha256.equals(identity.signerSha256, ignoreCase = true) &&
                     it.identity.versionCode < identity.versionCode
             }
             .maxByOrNull { it.identity.versionCode }
 
         if (baseline == null) {
-            baselineMissingReport(identity, checkedVersions, arguments.sourceUrl)
+            baselineMissingReport(identity, checkedVersions, arguments.sourceUrl, arguments.appId)
         } else {
             val facts = DexFactReader.scan(listOf(arguments.apk), baseline.hooks.map { it.stringAnchor }.toSet())
             CandidateCompatibilityAnalyzer.analyze(
                 identity = identity,
                 baseline = baseline,
+                requiredHookIds = policy.requiredHookIds,
                 facts = facts,
                 checkedVersions = checkedVersions,
                 regressionPassed = arguments.regressionPassed,
@@ -108,7 +117,8 @@ private fun analyzeCandidate(arguments: CandidateArguments) {
         }
     }
 
-    CandidateReportWriter.write(report, arguments.report)
+    val appReport = report.copy(appId = arguments.appId)
+    CandidateReportWriter.write(appReport, arguments.report)
     appendGithubOutput(report.status)
     println("Pipeline status: ${report.status}")
     report.hooks.forEach { hook ->
@@ -122,12 +132,14 @@ private fun baselineMissingReport(
     identity: io.github.nku100.wechatpad.compat.BuildIdentity,
     checkedVersions: List<String>,
     sourceUrl: String,
+    appId: String,
 ): CandidateCompatibilityReport {
     var status = CandidatePipelineStatus.DISCOVERED
     status = CandidatePipelineStateMachine.transition(status, CandidatePipelineEvent.APK_FETCHED)
     status = CandidatePipelineStateMachine.transition(status, CandidatePipelineEvent.IDENTITY_ACCEPTED)
     status = CandidatePipelineStateMachine.transition(status, CandidatePipelineEvent.BASELINE_REJECTED)
     return CandidateCompatibilityReport(
+        appId = appId,
         identity = identity,
         sourceUrl = sourceUrl,
         baselineVersion = null,
@@ -149,12 +161,14 @@ private fun parseArguments(args: Array<String>): CheckArguments {
         "Expected --targets <targets.json> and --apk <apk-path>"
     }
     val values = options.associate { it[0] to it[1] }
-    require(values.keys == setOf("--targets", "--apk")) {
-        "Expected --targets <targets.json> and --apk <apk-path>"
+    val allowed = setOf("--targets", "--apk", "--app-id")
+    require(values.keys.containsAll(setOf("--targets", "--apk")) && values.keys.all { it in allowed }) {
+        "Expected --targets <targets.json>, --apk <apk-path>, and optional --app-id <id>"
     }
     return CheckArguments(
         targets = File(values.getValue("--targets")),
         apk = File(values.getValue("--apk")),
+        appId = values["--app-id"] ?: "wechat",
     )
 }
 
@@ -167,7 +181,7 @@ private fun parseCandidateArguments(args: Array<String>): CandidateArguments {
         "--regression-passed",
         "--report",
     )
-    val allowedKeys = requiredKeys + "--profile-merged-to-main"
+    val allowedKeys = requiredKeys + setOf("--profile-merged-to-main", "--app-id")
     require(args.firstOrNull() == "analyze-candidate") {
         "Usage: analyze-candidate --targets <targets.json> --apk <apk-path> --source-url <url> " +
             "--checked-versions <comma-separated-versions> --regression-passed <true|false> --report <report.json>"
@@ -194,10 +208,11 @@ private fun parseCandidateArguments(args: Array<String>): CandidateArguments {
         regressionPassed = regressionPassed,
         profileMergedToMain = profileMergedToMain,
         report = File(values.getValue("--report")),
+        appId = values["--app-id"] ?: "wechat",
     )
 }
 
-private data class CheckArguments(val targets: File, val apk: File)
+private data class CheckArguments(val targets: File, val apk: File, val appId: String)
 
 private data class CandidateArguments(
     val targets: File,
@@ -207,6 +222,5 @@ private data class CandidateArguments(
     val regressionPassed: Boolean,
     val profileMergedToMain: Boolean,
     val report: File,
+    val appId: String,
 )
-
-private val OFFICIAL_APK_URL = Regex("https://dldir1v6\\.qq\\.com/weixin/android/[A-Za-z0-9._-]+\\.apk")

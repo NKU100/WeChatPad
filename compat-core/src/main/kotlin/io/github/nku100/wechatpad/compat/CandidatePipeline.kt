@@ -95,6 +95,7 @@ data class CandidateHookDiagnostic(
 
 @Serializable
 data class CandidateCompatibilityReport(
+    val appId: String = "wechat",
     val identity: BuildIdentity?,
     val sourceUrl: String?,
     val baselineVersion: String?,
@@ -106,11 +107,10 @@ data class CandidateCompatibilityReport(
 )
 
 object CandidateCompatibilityAnalyzer {
-    private val requiredHookIds = setOf("tablet", "login")
-
     fun analyze(
         identity: BuildIdentity,
         baseline: CompatibilityTarget,
+        requiredHookIds: Set<String>,
         facts: List<DexMethodFact>,
         checkedVersions: List<String>,
         regressionPassed: Boolean,
@@ -133,7 +133,7 @@ object CandidateCompatibilityAnalyzer {
         }
 
         status = CandidatePipelineStateMachine.transition(status, CandidatePipelineEvent.IDENTITY_ACCEPTED)
-        val baselineProblem = validateBaseline(baseline, identity, versionsToReport)
+        val baselineProblem = validateBaseline(baseline, identity, versionsToReport, requiredHookIds)
         if (baselineProblem != null) {
             status = CandidatePipelineStateMachine.transition(status, CandidatePipelineEvent.BASELINE_REJECTED)
             return report(
@@ -197,6 +197,7 @@ object CandidateCompatibilityAnalyzer {
     fun analyzeRegistered(
         identity: BuildIdentity,
         target: CompatibilityTarget,
+        requiredHookIds: Set<String>,
         facts: List<DexMethodFact>,
         checkedVersions: List<String>,
         regressionPassed: Boolean,
@@ -225,6 +226,7 @@ object CandidateCompatibilityAnalyzer {
             verification = IdentityVerification.STATIC_APK,
             targets = listOf(target),
             facts = emptyList(),
+            requiredHookIds = requiredHookIds,
         )
         if (profileShape.status == CompatibilityStatus.INVALID_PROFILE) {
             status = CandidatePipelineStateMachine.transition(status, CandidatePipelineEvent.BASELINE_REJECTED)
@@ -245,6 +247,7 @@ object CandidateCompatibilityAnalyzer {
             verification = IdentityVerification.STATIC_APK,
             targets = listOf(target),
             facts = facts,
+            requiredHookIds = requiredHookIds,
         )
         if (checkResult.status != CompatibilityStatus.COMPATIBLE) {
             status = CandidatePipelineStateMachine.transition(status, CandidatePipelineEvent.HOOK_ANALYSIS_UNRESOLVED)
@@ -395,6 +398,7 @@ object CandidateCompatibilityAnalyzer {
         baseline: CompatibilityTarget,
         candidate: BuildIdentity,
         checkedVersions: List<String>,
+        requiredHookIds: Set<String>,
     ): String? {
         if (!baseline.verificationStatus.runtimeVerified) {
             return "Baseline profile has not completed runtime verification"
@@ -406,8 +410,10 @@ object CandidateCompatibilityAnalyzer {
             return "Adaptation baseline is not included in the static regression window"
         }
         val hookIds = baseline.hooks.map(HookRule::id)
-        if (hookIds.size != requiredHookIds.size || hookIds.toSet() != requiredHookIds) {
-            return "Baseline must define exactly one tablet hook and one login hook"
+        if (requiredHookIds.isEmpty() || hookIds.size != requiredHookIds.size ||
+            hookIds.toSet() != requiredHookIds || hookIds.any(String::isBlank)
+        ) {
+            return "Baseline hooks do not match the registered app policy"
         }
         if (baseline.hooks.any { it.stringAnchor.isBlank() || it.expectedDescriptor.isBlank() }) {
             return "Baseline hook anchors and descriptors must be non-empty"

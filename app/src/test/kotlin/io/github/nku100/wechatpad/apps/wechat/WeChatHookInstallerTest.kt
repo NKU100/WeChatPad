@@ -1,4 +1,9 @@
-package io.github.nku100.wechatpad.runtime
+package io.github.nku100.wechatpad.apps.wechat
+
+import io.github.nku100.wechatpad.runtime.HookCallback
+import io.github.nku100.wechatpad.runtime.HookRegistrar
+import io.github.nku100.wechatpad.runtime.HookRegistration
+import io.github.nku100.wechatpad.runtime.InstallOutcome
 
 import java.lang.reflect.Method
 import org.junit.jupiter.api.Test
@@ -6,12 +11,12 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
-class HookInstallerTest {
+class WeChatHookInstallerTest {
     @Test
     fun rollsBackTheTabletHookWhenLoginRegistrationFails() {
         val registrar = RecordingRegistrar(failOnCall = 2)
 
-        val outcome = HookInstaller(registrar).install(tabletMethod(), loginMethod())
+        val outcome = WeChatHookInstaller(registrar).install(tabletMethod(), loginMethod())
 
         assertIs<InstallOutcome.Failed>(outcome)
         assertEquals(listOf("wechatpad_tablet"), registrar.removedIds)
@@ -22,7 +27,7 @@ class HookInstallerTest {
     fun leavesNoHookWhenTheFirstRegistrationFails() {
         val registrar = RecordingRegistrar(failOnCall = 1)
 
-        val outcome = HookInstaller(registrar).install(tabletMethod(), loginMethod())
+        val outcome = WeChatHookInstaller(registrar).install(tabletMethod(), loginMethod())
 
         assertIs<InstallOutcome.Failed>(outcome)
         assertTrue(registrar.removedIds.isEmpty())
@@ -33,7 +38,7 @@ class HookInstallerTest {
     fun reportsBothRegistrationsOnSuccess() {
         val registrar = RecordingRegistrar()
 
-        val outcome = HookInstaller(registrar).install(tabletMethod(), loginMethod())
+        val outcome = WeChatHookInstaller(registrar).install(tabletMethod(), loginMethod())
 
         assertIs<InstallOutcome.Installed>(outcome)
         assertEquals(listOf("wechatpad_tablet", "wechatpad_login"), registrar.attemptedIds)

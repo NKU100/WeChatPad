@@ -1,18 +1,28 @@
 package io.github.nku100.wechatpad.compat
 
 object CompatibilityResolver {
-    private val requiredHookIds = setOf("tablet", "login")
-
     fun resolve(
         identity: BuildIdentity,
         verification: IdentityVerification,
         targets: List<CompatibilityTarget>,
         facts: List<DexMethodFact>,
+        requiredHookIds: Set<String>,
     ): CompatibilityResult {
-        val target = targets.singleOrNull {
-            it.identity.versionName == identity.versionName &&
-                it.identity.versionCode == identity.versionCode
-        } ?: return rejected(CompatibilityStatus.UNKNOWN_BUILD, "No target registered for this WeChat version")
+        val sameBuild = targets.filter {
+            it.identity.versionName == identity.versionName && it.identity.versionCode == identity.versionCode
+        }
+        val matchingBuild = sameBuild.filter {
+            it.identity.packageName == identity.packageName && it.identity.abi == identity.abi
+        }
+        if (matchingBuild.size > 1) {
+            return rejected(CompatibilityStatus.INVALID_PROFILE, "Multiple profiles register this app build")
+        }
+        val target = matchingBuild.singleOrNull()
+            ?: return if (sameBuild.isEmpty()) {
+                rejected(CompatibilityStatus.UNKNOWN_BUILD, "No target registered for this app build")
+            } else {
+                rejected(CompatibilityStatus.IDENTITY_MISMATCH, "Package or ABI does not match the target")
+            }
 
         val expectedIdentity = target.identity
         if (!matchesTrustedIdentity(identity, expectedIdentity)) {
@@ -39,10 +49,12 @@ object CompatibilityResolver {
         }
 
         val hookIds = target.hooks.map(HookRule::id)
-        if (hookIds.size != requiredHookIds.size || hookIds.toSet() != requiredHookIds) {
+        if (requiredHookIds.isEmpty() || hookIds.size != requiredHookIds.size || hookIds.toSet() != requiredHookIds ||
+            hookIds.any(String::isBlank) || hookIds.size != hookIds.toSet().size
+        ) {
             return rejected(
                 CompatibilityStatus.INVALID_PROFILE,
-                "Profile must define exactly one 'tablet' hook and one 'login' hook",
+                "Profile must define unique, non-empty hook identifiers",
             )
         }
 
@@ -77,27 +89,34 @@ object CompatibilityResolver {
         identity: BuildIdentity,
         targets: List<CompatibilityTarget>,
         facts: List<DexMethodFact>,
+        requiredHookIds: Set<String>,
     ): CompatibilityResult {
         val matchingTargets = targets.filter {
             it.identity.versionName == identity.versionName &&
-                it.identity.versionCode == identity.versionCode
+                it.identity.versionCode == identity.versionCode &&
+                it.identity.packageName == identity.packageName &&
+                it.identity.abi == identity.abi
         }
         if (matchingTargets.size > 1) {
-            return rejected(CompatibilityStatus.INVALID_PROFILE, "Multiple profiles register this WeChat version")
+            return rejected(CompatibilityStatus.INVALID_PROFILE, "Multiple profiles register this app build")
         }
         if (matchingTargets.size == 1) {
-            return resolve(identity, IdentityVerification.STATIC_APK, targets, facts)
+            return resolve(identity, IdentityVerification.STATIC_APK, targets, facts, requiredHookIds)
         }
 
-        val latestVersionCode = targets.maxOfOrNull { it.identity.versionCode }
-            ?: return rejected(CompatibilityStatus.UNKNOWN_BUILD, "No compatibility targets are registered")
-        val latestTargets = targets.filter { it.identity.versionCode == latestVersionCode }
+        val appTargets = targets.filter {
+            it.identity.packageName == identity.packageName && it.identity.abi == identity.abi &&
+                it.identity.signerSha256.equals(identity.signerSha256, ignoreCase = true)
+        }
+        val latestVersionCode = appTargets.maxOfOrNull { it.identity.versionCode }
+            ?: return rejected(CompatibilityStatus.IDENTITY_MISMATCH, "No compatibility target matches this app package and ABI")
+        val latestTargets = appTargets.filter { it.identity.versionCode == latestVersionCode }
         val trustedIdentity = latestTargets.singleOrNull()?.identity
             ?: return rejected(CompatibilityStatus.INVALID_PROFILE, "Newest compatibility target is ambiguous")
         if (!matchesTrustedIdentity(identity, trustedIdentity)) {
             return rejected(
                 CompatibilityStatus.IDENTITY_MISMATCH,
-                "Package, ABI, or signer does not match the newest registered WeChat build",
+                "Package, ABI, or signer does not match the newest registered app build",
             )
         }
 

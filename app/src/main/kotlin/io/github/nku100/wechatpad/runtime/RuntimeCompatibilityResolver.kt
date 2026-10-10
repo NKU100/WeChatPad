@@ -2,6 +2,7 @@ package io.github.nku100.wechatpad.runtime
 
 import java.io.File
 import io.github.nku100.wechatpad.compat.BuildIdentity
+import io.github.nku100.wechatpad.compat.AppCompatibilityPolicy
 import io.github.nku100.wechatpad.compat.COMPATIBILITY_RESOLVER_VERSION
 import io.github.nku100.wechatpad.compat.CompatibilityResolver
 import io.github.nku100.wechatpad.compat.CompatibilityResult
@@ -21,10 +22,15 @@ data class RuntimeResolution(
 
 class RuntimeCompatibilityResolver(
     targets: List<CompatibilityTarget>,
+    private val policy: AppCompatibilityPolicy,
     private val cache: RuntimeResolutionCache,
     private val hashApk: (File) -> String = InstalledBuildIdentityReader()::sha256,
     private val readFacts: (List<File>, Set<String>) -> List<DexMethodFact> = DexFactReader::scan,
 ) {
+    init {
+        policy.validateTargets(targets)
+    }
+
     private val targets = targets.filter {
         it.verificationStatus == VerificationStatus.STATIC_VERIFIED ||
             it.verificationStatus.runtimeVerified
@@ -47,6 +53,7 @@ class RuntimeCompatibilityResolver(
                     verification = IdentityVerification.INSTALLED_PACKAGE,
                     targets = targets,
                     facts = emptyList(),
+                    requiredHookIds = policy.requiredHookIds,
                 )
                 return RuntimeResolution(cachedTarget, result, cacheHit = false)
             }
@@ -59,7 +66,8 @@ class RuntimeCompatibilityResolver(
 
         val apkSha256 = hashApk(build.apkFiles.first())
         val target = targets.singleOrNull {
-            it.identity.apkSha256.equals(apkSha256, ignoreCase = true)
+            it.identity.packageName == build.identity.packageName && it.identity.abi == build.identity.abi &&
+                it.identity.apkSha256.equals(apkSha256, ignoreCase = true)
         } ?: return RuntimeResolution(
             target = null,
             result = CompatibilityResult(
@@ -76,6 +84,7 @@ class RuntimeCompatibilityResolver(
                 verification = IdentityVerification.INSTALLED_PACKAGE,
                 targets = targets,
                 facts = emptyList(),
+                requiredHookIds = policy.requiredHookIds,
             )
             return RuntimeResolution(target, result, cacheHit = false)
         }
@@ -86,6 +95,7 @@ class RuntimeCompatibilityResolver(
             verification = IdentityVerification.INSTALLED_PACKAGE,
             targets = targets,
             facts = facts,
+            requiredHookIds = policy.requiredHookIds,
         )
         if (result.status == CompatibilityStatus.COMPATIBLE) {
             try {

@@ -1,6 +1,7 @@
 package io.github.nku100.wechatpad.runtime
 
 import io.github.nku100.wechatpad.compat.BuildIdentity
+import io.github.nku100.wechatpad.compat.apps.wechat.WeChatCompatibilityPolicy
 import io.github.nku100.wechatpad.compat.COMPATIBILITY_RESOLVER_VERSION
 import io.github.nku100.wechatpad.compat.CompatibilityStatus
 import io.github.nku100.wechatpad.compat.CompatibilityTarget
@@ -22,6 +23,7 @@ class RuntimeCompatibilityResolverTest {
         var scanCalls = 0
         val resolver = RuntimeCompatibilityResolver(
             targets = listOf(target()),
+            policy = WeChatCompatibilityPolicy.policy,
             cache = RuntimeResolutionCache(directory.resolve("cache").toFile()),
             hashApk = {
                 hashCalls++
@@ -48,6 +50,7 @@ class RuntimeCompatibilityResolverTest {
     fun returnsUnknownBuildWithoutCachingWhenTheInstalledHashIsUnregistered() = withFixture { directory, apk ->
         val resolver = RuntimeCompatibilityResolver(
             targets = listOf(target()),
+            policy = WeChatCompatibilityPolicy.policy,
             cache = RuntimeResolutionCache(directory.resolve("cache").toFile()),
             hashApk = { UNKNOWN_SHA256 },
             readFacts = { _, _ -> error("DEX must not be scanned for an unknown build") },
@@ -76,6 +79,7 @@ class RuntimeCompatibilityResolverTest {
         var scanCalls = 0
         val resolver = RuntimeCompatibilityResolver(
             targets = listOf(target()),
+            policy = WeChatCompatibilityPolicy.policy,
             cache = cache,
             hashApk = {
                 hashCalls++
@@ -114,6 +118,7 @@ class RuntimeCompatibilityResolverTest {
         var scanCalls = 0
         val resolver = RuntimeCompatibilityResolver(
             targets = listOf(target()),
+            policy = WeChatCompatibilityPolicy.policy,
             cache = cache,
             hashApk = {
                 hashCalls++
@@ -137,6 +142,7 @@ class RuntimeCompatibilityResolverTest {
     fun doesNotUseProfilesWithoutStaticOrRuntimeVerification() = withFixture { directory, apk ->
         val resolver = RuntimeCompatibilityResolver(
             targets = listOf(target().copy(verificationStatus = VerificationStatus.UNVERIFIED)),
+            policy = WeChatCompatibilityPolicy.policy,
             cache = RuntimeResolutionCache(directory.resolve("cache").toFile()),
             hashApk = { APK_SHA256 },
             readFacts = { _, _ -> error("Unverified profiles must not be scanned") },
@@ -178,6 +184,7 @@ class RuntimeCompatibilityResolverTest {
         ),
         featureRulesVersion = 1,
         verificationStatus = VerificationStatus.STATIC_VERIFIED,
+        sourceUrl = "https://dldir1v6.qq.com/weixin/android/test.apk",
         hooks = listOf(
             HookRule("tablet", TABLET_ANCHOR, listOf("Lfixture/NewEnvironment;"), "Z", TABLET_METHOD),
             HookRule("login", LOGIN_ANCHOR, listOf("Landroid/view/View;", "Landroidx/lifecycle/y;"), "V", LOGIN_METHOD),

@@ -2,7 +2,9 @@
 
 import hashlib
 import json
+import importlib
 import csv
+import argparse
 import io
 from pathlib import Path
 import re
@@ -12,13 +14,26 @@ import time
 import xml.etree.ElementTree as ET
 import zipfile
 
+from scripts.ci.app_policy import get_policy
+
 ROOT = Path('work/runtime-smoke')
 EVIDENCE = ROOT / 'evidence'
 MAGISK = '/debug_ramdisk/magisk'
 PAGE_SIZE_BACKCOMPAT_COMMAND = 'setprop bionic.linker.16kb.app_compat.enabled true; setprop pm.16kb.app_compat.disabled false'
-WECHAT = 'com.tencent.mm'
+APP_ID = 'wechat'
+APP_POLICY = get_policy(APP_ID)
+APP_PACKAGE = APP_POLICY.package_name
+UI_STRATEGY = importlib.import_module(APP_POLICY.runtime_ui_strategy)
 MODULE = 'io.github.nku100.wechatpad'
 stage = 'START'
+
+
+def configure_app_id(app_id):
+    global APP_ID, APP_POLICY, APP_PACKAGE, UI_STRATEGY
+    APP_POLICY = get_policy(app_id)
+    APP_ID = APP_POLICY.app_id
+    APP_PACKAGE = APP_POLICY.package_name
+    UI_STRATEGY = importlib.import_module(APP_POLICY.runtime_ui_strategy)
 
 
 def run(*args, timeout=60, check=True):
@@ -54,17 +69,19 @@ def nodes(xml):
         return []
 
 
-def has_wechat_ui(xml):
-    return any(node.get('package') == WECHAT for node in nodes(xml))
+def has_app_ui(xml):
+    return UI_STRATEGY.has_app_ui(xml, APP_PACKAGE)
+
+
+has_wechat_ui = has_app_ui
 
 
 def is_tablet_entry(text):
-    return bool(re.search(r'(?:log(?:ged)?\s*in|登录).*(?:phone\s*&\s*tablet|平板)', text, re.I))
+    return UI_STRATEGY.tablet_entry_visible(text)
 
 
 def qr_page_ready(activity, xml):
-    return ('LoginAsExDeviceUI' in activity and has_wechat_ui(xml)
-            and any(re.search(r'QR\s*code|二维码', node.get('text', ''), re.I) for node in nodes(xml)))
+    return UI_STRATEGY.qr_page_ready(activity, xml, APP_PACKAGE, APP_POLICY.runtime_qr_page)
 
 
 def unique_node(xml, predicate):
@@ -133,26 +150,23 @@ def enable_page_size_backcompat():
 
 def mobile_input(label):
     enable_page_size_backcompat()
-    adb('shell', 'am', 'force-stop', WECHAT)
-    adb('shell', 'monkey', '-p', WECHAT, '-c', 'android.intent.category.LAUNCHER', '1')
+    adb('shell', 'am', 'force-stop', APP_PACKAGE)
+    adb('shell', 'monkey', '-p', APP_PACKAGE, '-c', 'android.intent.category.LAUNCHER', '1')
     ready = 0
     for attempt in range(30):
         activity, ui = snapshot(label + '-current')
-        if 'MobileInputUI' in activity and has_wechat_ui(ui):
+        if UI_STRATEGY.login_input_ready(activity, ui, APP_PACKAGE):
             ready += 1
             if ready >= 2:
                 snapshot(label)
                 return ui
         else:
             ready = 0
-            node = unique_node(ui, lambda n: n.get('text', '').strip().lower() in (
-                'log in', 'login', 'log in via mobile number', 'log in with phone number',
-                'log in on tablet only',
-                'agree', 'accept', 'allow', 'while using the app', '登录', '手机号登录', '同意'))
+            node = unique_node(ui, lambda n: UI_STRATEGY.is_login_navigation_label(n.get('text', '')))
             if node is not None:
                 tap(node)
         time.sleep(2)
-    raise RuntimeError('WeChat did not reach a stable, rendered MobileInputUI')
+    raise RuntimeError(f'{APP_ID} did not reach a stable, rendered login input UI')
 
 
 def reboot():
@@ -218,19 +232,7 @@ def configure_manager():
 
 
 def hook_diagnostics(logs):
-    records = [line for line in logs.splitlines()
-               if 'WeChatPad' in line and 'process skipped:' not in line
-               and any(marker in line for marker in ['status=', 'waiting for Tinker',
-                                                       'resolved tablet=', 'installed 2 WeChat hooks'])]
-    compatible = any('status=COMPATIBLE' in line for line in records)
-    installed = any('installed 2 WeChat hooks' in line for line in records)
-    descriptors = [line.split('resolved ', 1)[1] for line in records if 'resolved tablet=' in line]
-    return {
-        'moduleLoaded': 'OBSERVED' if records else 'NOT_OBSERVED',
-        'compatibility': 'COMPATIBLE' if compatible else 'NOT_OBSERVED',
-        'hookInstallation': 'INSTALLED_2' if installed else 'NOT_OBSERVED',
-        'resolvedHooks': list(dict.fromkeys(descriptors)),
-        'records': list(dict.fromkeys(records))[-12:]}
+    return UI_STRATEGY.hook_diagnostics(logs)
 
 
 def collect_logs():
@@ -250,6 +252,21 @@ def apk_digest(path):
     return digest.hexdigest()
 
 
+def apk_native_abi(path):
+    with zipfile.ZipFile(path) as apk:
+        abis = {
+            match.group(1)
+            for name in apk.namelist()
+            if (match := re.fullmatch(r'lib/([^/]+)/[^/]+\.so', name))
+        }
+    if len(abis) != 1:
+        raise ValueError(f'Candidate APK must contain native libraries for exactly one ABI, found {sorted(abis)}')
+    abi = next(iter(abis))
+    if abi not in APP_POLICY.supported_abis:
+        raise ValueError(f'Candidate APK ABI {abi} is unsupported by {APP_ID} policy')
+    return abi
+
+
 def prepare_environment(report):
     global stage
     stage = 'AUTOMATION_SETUP'
@@ -258,11 +275,11 @@ def prepare_environment(report):
     enable_page_size_backcompat()
     save('page-size-compat.txt', adb('shell', 'getprop'))
     adb('logcat', '-c')
-    save('wechat-install.txt', adb('install', '-r', '-g', str(ROOT / 'wechat.apk'), timeout=240))
+    save(f'{APP_ID}-install.txt', adb('install', '-r', '-g', str(ROOT / f'{APP_ID}.apk'), timeout=240))
     ui = mobile_input('baseline-mobile')
     if any(is_tablet_entry(n.get('text', '')) for n in nodes(ui)):
-        raise RuntimeError('Tablet choice already exists without WeChatPad; baseline does not establish module effect')
-    report['baseline'] = 'NO_TABLET_ENTRY'
+        raise RuntimeError(f'Policy entry already exists without module; baseline does not establish module effect')
+    report['baseline'] = APP_POLICY.runtime_baseline
     stage = 'FRAMEWORK_INSTALL'
     bootstrap_magisk()
     adb('push', str(ROOT / 'lsposed.zip'), '/data/local/tmp/lsposed.zip')
@@ -289,12 +306,12 @@ def prepare_environment(report):
 def probe_environment(report):
     global stage
     stage = 'HOOK_AND_LOGIN'
-    adb('shell', 'pm', 'clear', WECHAT)
+    adb('shell', 'pm', 'clear', APP_PACKAGE)
     adb('logcat', '-c')
     ui = mobile_input('module-mobile')
     choice = unique_node(ui, lambda n: is_tablet_entry(n.get('text', '')))
     if choice is None:
-        raise RuntimeError('No tablet login choice after module enable')
+        raise RuntimeError(f'No {APP_ID} policy entry after module enable')
     tap(choice)
     for _ in range(20):
         activity, ui = snapshot('qr-current')
@@ -307,16 +324,27 @@ def probe_environment(report):
     else:
         raise RuntimeError('Tablet login did not reach a stable rendered QR page')
     logs = collect_logs()
-    if 'status=COMPATIBLE' not in logs or 'installed 2 WeChat hooks' not in logs:
-        raise RuntimeError('Rendered QR page was not accompanied by compatible WeChatPad hook installation logs')
-    report.update(status='RUNTIME_SMOKE_VERIFIED', stage='COMPLETE', hooks=2, qrPage='LoginAsExDeviceUI')
+    hook_log = getattr(UI_STRATEGY, 'hook_installation_log', '')
+    if 'status=COMPATIBLE' not in logs or not hook_log or hook_log not in logs:
+        raise RuntimeError('Rendered app page was not accompanied by compatible app hook installation logs')
+    apk_path = ROOT / f'{APP_ID}.apk'
+    report.update(status='RUNTIME_SMOKE_VERIFIED', stage='COMPLETE', hookIds=list(APP_POLICY.required_hook_ids),
+                  hooks=len(APP_POLICY.required_hook_ids), qrPage=APP_POLICY.runtime_qr_page,
+                  appId=APP_ID, packageName=APP_PACKAGE, abi=apk_native_abi(apk_path),
+                  apkSha256=apk_digest(apk_path))
 
-def main(mode="full"):
+def main(mode="full", app_id=None):
     global stage
+    if app_id is not None:
+        configure_app_id(app_id)
+    apk_path = ROOT / f'{APP_ID}.apk'
     EVIDENCE.mkdir(parents=True, exist_ok=True)
-    report = {'status': 'FAILED', 'stage': stage}
-    if (ROOT / 'wechat.apk').is_file():
-        report['apkSha256'] = apk_digest(ROOT / 'wechat.apk')
+    report = {'status': 'FAILED', 'stage': stage, 'appId': APP_ID}
+    if apk_path.is_file():
+        try:
+            report.update(packageName=APP_PACKAGE, abi=apk_native_abi(apk_path), apkSha256=apk_digest(apk_path))
+        except (OSError, ValueError, zipfile.BadZipFile) as error:
+            report.update(packageName=APP_PACKAGE, apkSha256=apk_digest(apk_path), identityError=str(error))
     try:
         if mode in {'full', 'prepare'}:
             prepare_environment(report)
@@ -324,7 +352,7 @@ def main(mode="full"):
             if mode == 'probe':
                 if not (ROOT / 'prepared.json').is_file():
                     raise RuntimeError('Runtime environment has not passed baseline preparation')
-                report['baseline'] = 'NO_TABLET_ENTRY'
+            report['baseline'] = APP_POLICY.runtime_baseline
             probe_environment(report)
         else:
             report.update(status='ENVIRONMENT_READY', stage='READY')
@@ -340,11 +368,14 @@ def main(mode="full"):
         logcat = EVIDENCE / 'logcat.txt'
         report['runtimeDiagnostics'] = hook_diagnostics(logcat.read_text(errors='replace') if logcat.is_file() else '')
         (EVIDENCE / 'smoke-report.json').write_text(json.dumps(report, indent=2) + '\n')
-        (EVIDENCE / 'summary.md').write_text('# WeChat runtime smoke\n\n' + json.dumps(report, indent=2)
+        (EVIDENCE / 'summary.md').write_text(f'# {APP_ID} runtime smoke\n\n' + json.dumps(report, indent=2)
                                             + '\n\nNo QR scanning, account login or dual-device session was performed.\n')
         print(json.dumps(report))
     return 0 if report['status'] in {'RUNTIME_SMOKE_VERIFIED', 'ENVIRONMENT_READY'} else 1
 
 
 if __name__ == '__main__':
-    raise SystemExit(main())
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--app-id', default='wechat')
+    args = parser.parse_args()
+    raise SystemExit(main(app_id=args.app_id))

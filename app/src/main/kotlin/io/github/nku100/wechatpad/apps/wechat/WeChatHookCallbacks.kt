@@ -1,8 +1,9 @@
-package io.github.nku100.wechatpad.runtime
+package io.github.nku100.wechatpad.apps.wechat
 
 import android.view.View
+import io.github.nku100.wechatpad.runtime.HookCall
 
-class HookCallbacks(
+class WeChatHookCallbacks(
     private val stackTraceProvider: () -> Array<StackTraceElement> = { Thread.currentThread().stackTrace },
     private val isView: (Any) -> Boolean = { it is View },
     private val visibilityOf: (Any) -> Int = { (it as View).visibility },

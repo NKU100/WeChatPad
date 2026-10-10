@@ -7,11 +7,15 @@ import shutil
 import subprocess
 
 from scripts.ci import runtime_smoke as smoke
+from scripts.ci.app_policy import get_policy
 from scripts.ci.codex_adaptation import sha256
 
 
 def configure(directory):
     state = json.loads((directory / 'state.json').read_text())
+    app_id = state.get('appId', state.get('report', {}).get('appId'))
+    policy = get_policy(app_id)
+    smoke.configure_app_id(policy.app_id)
     root = Path(state['runtime']['root'])
     smoke.ROOT = root
     socket = Path(state['runtime']['socket'])
@@ -27,8 +31,11 @@ def initialize(directory, root, serial):
         raise RuntimeError('Runtime adaptation requires exactly one disposable emulator')
     state_path = directory / 'state.json'
     state = json.loads(state_path.read_text())
+    policy = get_policy(state.get('appId', state.get('report', {}).get('appId')))
+    smoke.configure_app_id(policy.app_id)
     workspace = Path(state['worktree'])
-    if sha256(root / 'wechat.apk') != state['report']['identity']['apkSha256']:
+    candidate_apk = root / f'{policy.app_id}.apk'
+    if sha256(candidate_apk) != state['report']['identity']['apkSha256']:
         raise ValueError('Runtime candidate does not match verified identity')
     smoke.ROOT = root
     smoke.EVIDENCE = root / 'prepare-evidence'
@@ -49,13 +56,17 @@ def initialize(directory, root, serial):
         raise RuntimeError('The model ADB server must expose exactly the dedicated emulator')
     state['runtime'] = {'root': str(root), 'serial': serial, 'socket': str(socket)}
     state_path.write_text(json.dumps(state, indent=2))
-    (workspace / 'work/analysis/runtime-device.json').write_text(json.dumps({
-        'serial': serial, 'baseline': 'NO_TABLET_ENTRY',
-        'instructions': 'Run adb wechat-launch to restore 16 KB compatibility and start WeChat. After adding the profile, run wechatpad-build for guarded host checks/tests/build; do not retry Gradle inside the network-disabled sandbox. Build logs are under work/analysis/host-build. Use adb device commands to inspect the disposable AVD. Interrupted requests are cancelled by the relay. Independent runtime verification runs after every completed turn.'}, indent=2))
+    runtime_instructions = workspace / 'work/analysis/runtime-device.json'
+    runtime_instructions.parent.mkdir(parents=True, exist_ok=True)
+    runtime_instructions.write_text(json.dumps({
+        'appId': policy.app_id, 'serial': serial, 'baseline': policy.runtime_baseline,
+        'instructions': f'Run adb app-launch to restore the managed runtime configuration and start {policy.package_name}. After adding the profile, run wechatpad-build for guarded host checks/tests/build; do not retry Gradle inside the network-disabled sandbox. Build logs are under work/analysis/host-build. Use adb device commands to inspect the disposable AVD. Interrupted requests are cancelled by the relay. Independent runtime verification runs after every completed turn.'}, indent=2))
 
 
 def verify_runtime(directory):
     state, root = configure(directory)
+    policy = get_policy(state.get('appId', state.get('report', {}).get('appId')))
+    smoke.configure_app_id(policy.app_id)
     workspace = Path(state['worktree'])
     apk = workspace / 'app/build/outputs/apk/debug/app-debug.apk'
     iteration = len(list(root.glob('iteration-*'))) + 1
@@ -63,9 +74,9 @@ def verify_runtime(directory):
     smoke.EVIDENCE.mkdir(parents=True)
     try:
         # Reinstall the controller's immutable exact candidate before every independent probe.
-        if sha256(root / 'wechat.apk') != state['report']['identity']['apkSha256']:
+        if sha256(root / f'{policy.app_id}.apk') != state['report']['identity']['apkSha256']:
             raise ValueError('Runtime candidate changed after preparation')
-        smoke.adb('install', '-r', '-g', str(root / 'wechat.apk'), timeout=240)
+        smoke.adb('install', '-r', '-g', str(root / f'{policy.app_id}.apk'), timeout=240)
         result = smoke.adb('install', '-r', str(apk), timeout=120)
         (smoke.EVIDENCE / 'module-install.txt').write_bytes(result.stdout + result.stderr)
         smoke.reboot()
@@ -89,7 +100,7 @@ def verify_runtime(directory):
         summary = {key: diagnostic.get(key, 'NOT_OBSERVED')
                    for key in ['moduleLoaded', 'compatibility', 'hookInstallation', 'resolvedHooks']}
         guidance = ''
-        if diagnostic.get('hookInstallation') == 'INSTALLED_2':
+        if diagnostic.get('hookInstallation') == f'INSTALLED_{len(policy.required_hook_ids)}':
             guidance = ' The controller observed installed hooks; missing module injection is not supported by this probe. Reassess the selected decision method, its callers, early returns and cached results.'
         raise ValueError('Independent AVD verification failed: ' + report.get('reason', report['status'])
                          + '. Controller runtime observations: ' + json.dumps(summary) + guidance

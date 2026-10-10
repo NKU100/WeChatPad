@@ -4,7 +4,7 @@
 
 **Goal:** 完成 WeChatPad 首阶段本地实现，使同一 APK 事实读取器和兼容匹配核心同时服务于 Android 模块与桌面检查器，并在专用 AVD 上验证微信 8.0.69 和 8.0.79 的登录界面。
 
-**Architecture:** 建立 `app`、纯 Kotlin/JVM `compat-core` 和 Kotlin/JVM `compat-checker` 三个 Gradle 子项目。`compat-core` 读取共享的 `compatibility/targets.json`，从共同的 DEX 事实读取器接收方法描述符、参数/返回类型和方法内字符串，再进行严格身份校验、唯一候选解析与缓存判定；Android 和桌面侧只负责提供 APK 身份与目标方法句柄。Android 模块使用官方 libxposed API 102；Hook 仅在两个目标均完成解析和反射解析后成组安装。
+**Architecture:** 建立 `app`、纯 Kotlin/JVM `compat-core` 和 Kotlin/JVM `compat-checker` 三个 Gradle 子项目。`compat-core` 读取共享的 `compatibility/wechat/targets.json`，从共同的 DEX 事实读取器接收方法描述符、参数/返回类型和方法内字符串，再进行严格身份校验、唯一候选解析与缓存判定；Android 和桌面侧只负责提供 APK 身份与目标方法句柄。Android 模块使用官方 libxposed API 102；Hook 仅在两个目标均完成解析和反射解析后成组安装。
 
 **Tech Stack:** 沿用 [NKU100/carrier-ims](https://github.com/NKU100/carrier-ims) 的现代 LSPosed 模块结构、AGP/API 版本和 Java 21 字节码目标；首轮工程固定使用 Gradle 9.8.0、Android Gradle Plugin 9.4.0、Kotlin Gradle Plugin/serialization plugin 2.4.20、官方 `io.github.libxposed:api:102.0.0`（`compileOnly`）、Google `com.android.tools.smali:smali-dexlib2:3.0.10`、Kotlin serialization JSON 1.11.0，以及 Android SDK `apkanalyzer`/`apksigner`。版本目录只记录稳定版的精确版本，不使用动态版本、快照或预览版；开始 Task 1 时再次核对上游是否发布了更新的稳定版，并同步更新 Gradle wrapper 和依赖版本目录。Android app 使用 AGP 9.4 内置 Kotlin 支持，不应用旧的 `org.jetbrains.kotlin.android` 插件；根构建显式固定 KGP 2.4.20，供兼容核心、检查器及序列化编译插件使用。模块使用 `minSdk=28`、`compileSdk=37` / minor 2，与本地 Android 17 AVD 对齐。
 
@@ -139,7 +139,7 @@ git commit -m "feat: add shared compatibility resolver"
 - Create: `compat-core/src/main/kotlin/io/github/nku100/wechatpad/compat/DexFactReader.kt`
 - Create: `compat-core/src/test/kotlin/io/github/nku100/wechatpad/compat/DexFactReaderTest.kt`
 - Create: `compat-core/src/test/resources/multidex-fixture.apk`
-- Create: `compatibility/targets.json`
+- Create: `compatibility/wechat/targets.json`
 - Create: `compat-checker/src/main/kotlin/io/github/nku100/wechatpad/checker/Main.kt`
 - Create: `compat-checker/src/main/kotlin/io/github/nku100/wechatpad/checker/ApkIdentityInspector.kt`
 - Create: `compat-checker/src/test/kotlin/io/github/nku100/wechatpad/checker/ApkIdentityInspectorTest.kt`
@@ -149,7 +149,7 @@ git commit -m "feat: add shared compatibility resolver"
 **Interfaces:**
 - `DexFactReader.scan(apkFiles: List<File>, stringAnchors: Set<String>): List<DexMethodFact>` walks every `classes*.dex`, reads method descriptors and code string references, and retains only methods containing at least one requested anchor.
 - `ApkIdentityInspector.inspect(apk: File): BuildIdentity` obtains package/version metadata via Android SDK `apkanalyzer`, ABI from APK native-library entries, signer via `apksigner`, and computes SHA-256 from the supplied APK.
-- CLI command: `./gradlew :compat-checker:run --args='check --targets compatibility/targets.json --apk <apk-path>'`; exit 0 only for one fully compatible target and both hook resolutions.
+- CLI command: `./gradlew :compat-checker:run --args='check --targets compatibility/wechat/targets.json --apk <apk-path>'`; exit 0 only for one fully compatible target and both hook resolutions.
 - Target JSON contains the exact official CDN URLs, SHA-256 values, certificate digest, ABI, build identity, feature rule version, anchors, method shapes, and expected descriptors recorded in the spec.
 
 - [ ] **Step 1: Write DEX reader tests using a small two-DEX fixture**
@@ -174,8 +174,8 @@ Populate `targets.json` from the spec. The 8.0.69 tablet rule uses `Lenovo TB-97
 Run:
 
 ```bash
-./gradlew :compat-checker:run --args='check --targets compatibility/targets.json --apk work/apks/wechat-8.0.69.apk'
-./gradlew :compat-checker:run --args='check --targets compatibility/targets.json --apk work/apks/wechat-8.0.79.apk'
+./gradlew :compat-checker:run --args='check --targets compatibility/wechat/targets.json --apk work/apks/wechat-8.0.69.apk'
+./gradlew :compat-checker:run --args='check --targets compatibility/wechat/targets.json --apk work/apks/wechat-8.0.79.apk'
 ```
 
 Expected: each command reports the matching version, verified identity, and exactly one result for each hook. The resolved descriptors must match the spec table. A deliberately modified test profile or wrong APK must exit nonzero.
@@ -183,7 +183,7 @@ Expected: each command reports the matching version, verified identity, and exac
 - [ ] **Step 6: Commit the reader and profiles**
 
 ```bash
-git add compat-core compat-checker compatibility/targets.json
+git add compat-core compat-checker compatibility/wechat/targets.json
 git commit -m "feat: verify WeChat compatibility profiles"
 ```
 
@@ -219,7 +219,7 @@ git commit -m "feat: verify WeChat compatibility profiles"
 - `TargetMethodResolver.resolve(classLoader: ClassLoader, descriptor: String): Method` converts the resolved DEX descriptor to a reflected method and rejects missing or signature-mismatched methods.
 - `HookInstaller.install(tabletMethod: Method, loginMethod: Method): InstallOutcome` registers both API 102 hooks; if either registration fails, it removes any hook already installed and returns failure.
 - Hook callbacks use the action ids already present in `HookRule`; tablet behavior matches the reference commit’s call-stack exception and login behavior only changes `GONE` to `VISIBLE`.
-- The runtime reads `compatibility/targets.json` from the APK asset packaged from the root file; it does not maintain a second profile copy.
+- The runtime reads `compatibility/wechat/targets.json` from the APK asset packaged from the root file; it does not maintain a second profile copy.
 
 - [x] **Step 1: Write callback, method-descriptor, bootstrap, identity, cache, and install-rollback tests**
 
@@ -257,7 +257,7 @@ git commit -m "feat: add WeChat tablet login hooks"
 **Files:**
 - Modify: dedicated local AVD configuration only if required to use an installed Android 37.2 Google APIs ARM64 system image with 16 KB pages.
 - Create: `docs/validation/wechatpad-local-smoke.md`
-- Modify: `compatibility/targets.json` after each successful local runtime result.
+- Modify: `compatibility/wechat/targets.json` after each successful local runtime result.
 - Modify: `docs/superpowers/specs/2026-10-04-wechatpad-design.md` to record the completed phase and any evidence-driven design correction.
 
 **Interfaces:**
@@ -288,7 +288,7 @@ Record both WeChat version codes, AVD image, official LSPosed version/API, basel
 - [x] **Step 6: Commit the local validation record**
 
 ```bash
-git add compatibility/targets.json docs/validation/wechatpad-local-smoke.md docs/superpowers/specs/2026-10-04-wechatpad-design.md
+git add compatibility/wechat/targets.json docs/validation/wechatpad-local-smoke.md docs/superpowers/specs/2026-10-04-wechatpad-design.md
 git commit -m "test: record local WeChat login smoke results"
 ```
 

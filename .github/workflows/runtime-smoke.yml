@@ -7,6 +7,10 @@ on:
         description: Rebuild pinned ramdisk and verify reproduction
         type: boolean
         default: false
+      app_id:
+        description: Registered application policy to smoke
+        type: string
+        default: wechat
       module_run_id:
         description: Successful Build module APK run to reuse
         type: string
@@ -14,6 +18,9 @@ on:
 
   workflow_call:
     inputs:
+      app_id:
+        type: string
+        default: wechat
       rebuild_ramdisk:
         description: Rebuild pinned ramdisk and verify reproduction
         type: boolean
@@ -23,10 +30,10 @@ on:
         required: true
       module_artifact:
         type: string
-        default: wechatpad-adapted-module
+        default: ''
       candidate_artifact:
         type: string
-        default: wechatpad-runtime-candidate
+        default: ''
 
 permissions:
   contents: read
@@ -41,9 +48,13 @@ jobs:
   smoke:
     runs-on: ubuntu-24.04
     env:
+      APP_ID: ${{ inputs.app_id || 'wechat' }}
       REBUILD_RAMDISK: ${{ inputs.rebuild_ramdisk }}
     steps:
       - uses: actions/checkout@v7
+      - name: Resolve trusted application policy
+        id: policy
+        run: python3 -m scripts.ci.app_policy --app-id "$APP_ID" --github-output "$GITHUB_OUTPUT"
       - name: Reserve space for Android system and userdata
         run: |
           mkdir -p work/runtime-smoke/evidence
@@ -62,7 +73,7 @@ jobs:
       - name: Reuse module build
         uses: actions/download-artifact@v8
         with:
-          name: ${{ inputs.module_artifact || 'wechatpad-module-apk' }}
+          name: ${{ inputs.module_artifact || format('{0}-{1}-adapted-module', steps.policy.outputs.artifact_prefix, steps.policy.outputs.app_id) }}
           path: work/runtime-smoke/module
           run-id: ${{ inputs.module_run_id }}
           github-token: ${{ github.token }}
@@ -93,33 +104,36 @@ jobs:
         if: inputs.candidate_artifact != ''
         run: |
           python3 - <<'PYVERIFY'
-          import hashlib, json
+          import hashlib, json, os
           from pathlib import Path
           root = Path('work/runtime-smoke')
           report = json.loads((root / 'candidate-report.json').read_text())
+          from scripts.ci.app_policy import policy_for_report
+          policy = policy_for_report(report, os.environ['APP_ID'])
           assert report['status'] == 'STATIC_VERIFIED_PENDING_RUNTIME'
           expected = report['identity']
-          assert expected['packageName'] == 'com.tencent.mm'
-          assert expected['abi'] == 'arm64-v8a'
-          with (root / 'wechat.apk').open('rb') as apk:
+          assert expected['abi'] in policy.supported_abis
+          with (root / f"{policy.app_id}.apk").open('rb') as apk:
               digest = hashlib.file_digest(apk, 'sha256').hexdigest()
           assert digest == expected['apkSha256'], 'Candidate APK changed after static verification'
           PYVERIFY
-      - name: Download and verify registered official WeChat
+      - name: Download and verify registered official app
         if: inputs.candidate_artifact == ''
         run: |
           python3 -m scripts.ci.candidate_selection \
+            --app-id "$APP_ID" \
             --directory work/runtime-smoke
       - name: Verify official APK signer
         run: |
           sdkmanager 'build-tools;37.0.0'
-          "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --print-certs work/runtime-smoke/wechat.apk > work/runtime-smoke/evidence/wechat-signer.txt
-          grep -F '0fe4ff85c215918396dadc7cd8ce6963339af33d37751a56e54c7206b63a3c7c' work/runtime-smoke/evidence/wechat-signer.txt
+          "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --print-certs "work/runtime-smoke/$APP_ID.apk" > "work/runtime-smoke/evidence/$APP_ID-signer.txt"
+          signer="$(python3 -c 'import os; from scripts.ci.app_policy import get_policy; print(get_policy(os.environ["APP_ID"]).signer_sha256)')"
+          grep -F "$signer" "work/runtime-smoke/evidence/$APP_ID-signer.txt"
       - name: Enable KVM access
         run: |
           test -c /dev/kvm
           sudo chmod 666 /dev/kvm
-      - name: Verify root, official LSPosed and WeChat UI
+      - name: Verify root, official LSPosed and selected app UI
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: '37.2'
@@ -138,13 +152,13 @@ jobs:
             mkdir -p work/runtime-smoke/ui-classes
             javac --release 17 -cp "$ANDROID_HOME/platforms/android-37.2/android.jar" -d work/runtime-smoke/ui-classes scripts/ci/UiHierarchy.java
             "$ANDROID_HOME/build-tools/37.0.0/d8" --min-api 37 --lib "$ANDROID_HOME/platforms/android-37.2/android.jar" --output work/runtime-smoke/ui-hierarchy.jar work/runtime-smoke/ui-classes/UiHierarchy.class
-            python3 scripts/ci/runtime_smoke.py
+            python3 scripts/ci/runtime_smoke.py --app-id "$APP_ID"
             python3 scripts/ci/runtime_tooling_probe.py
       - name: Upload runtime evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: wechatpad-runtime-smoke
+          name: ${{ steps.policy.outputs.artifact_prefix }}-${{ steps.policy.outputs.app_id }}-runtime-smoke
           path: |
             work/runtime-smoke/evidence/
             work/runtime-smoke/tooling/tooling-report.json

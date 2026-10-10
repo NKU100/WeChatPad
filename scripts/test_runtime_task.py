@@ -11,13 +11,19 @@ from scripts.ci.runtime_task import runtime_result, main
 
 class RuntimeTaskTest(unittest.TestCase):
     def setUp(self):
-        self.report = {'status': 'STATIC_VERIFIED_PENDING_RUNTIME',
-                       'identity': {'versionName': '8.0.79', 'versionCode': 3200, 'apkSha256': 'a' * 64},
-                       'suggestedProfile': {'identity': {'versionName': '8.0.79', 'versionCode': 3200, 'apkSha256': 'a' * 64},
+        identity = {'packageName': 'com.tencent.mm', 'versionName': '8.0.79', 'versionCode': 3200,
+                    'abi': 'arm64-v8a', 'apkSha256': 'a' * 64,
+                    'signerSha256': '0fe4ff85c215918396dadc7cd8ce6963339af33d37751a56e54c7206b63a3c7c'}
+        self.report = {'appId': 'wechat', 'status': 'STATIC_VERIFIED_PENDING_RUNTIME',
+                       'identity': identity,
+                       'suggestedProfile': {'identity': identity,
+                                            'sourceUrl': 'https://dldir1v6.qq.com/weixin/android/test.apk',
+                                            'hooks': [{'id': 'tablet'}, {'id': 'login'}],
                                             'verificationStatus': 'static-verified'}}
         self.report['sourceUrl'] = 'https://dldir1v6.qq.com/weixin/android/test.apk'
-        self.smoke = {'status': 'RUNTIME_SMOKE_VERIFIED', 'baseline': 'NO_TABLET_ENTRY',
-                      'hooks': 2, 'qrPage': 'LoginAsExDeviceUI',
+        self.smoke = {'appId': 'wechat', 'packageName': 'com.tencent.mm', 'abi': 'arm64-v8a',
+                      'status': 'RUNTIME_SMOKE_VERIFIED', 'baseline': 'NO_TABLET_ENTRY',
+                      'hooks': 2, 'hookIds': ['tablet', 'login'], 'qrPage': 'LoginAsExDeviceUI',
                       'apkSha256': 'a' * 64}
 
     def test_success_promotes_only_matching_candidate_and_preserves_input(self):
@@ -35,6 +41,13 @@ class RuntimeTaskTest(unittest.TestCase):
                 result = runtime_result(self.report, evidence, conclusion)
                 self.assertEqual(result['status'], 'RUNTIME_REJECTED')
                 self.assertEqual(result['suggestedProfile']['verificationStatus'], 'static-verified')
+
+    def test_rejects_cross_app_package_abi_or_hook_evidence(self):
+        for field, value in [('appId', 'other'), ('packageName', 'org.example.other'),
+                             ('abi', 'x86_64'), ('hookIds', ['tablet'])]:
+            with self.subTest(field=field):
+                result = runtime_result(self.report, dict(self.smoke, **{field: value}), 'success')
+                self.assertEqual(result['status'], 'RUNTIME_REJECTED')
 
     def test_cancelled_or_skipped_smoke_preserves_pending_runtime_status(self):
         for conclusion in ['cancelled', 'skipped']:
@@ -76,9 +89,14 @@ class RuntimeTaskTest(unittest.TestCase):
             git('config', 'user.name', 'test')
             git('config', 'user.email', 'test@example.com')
             git('remote', 'add', 'origin', str(origin))
-            (checkout / 'compatibility').mkdir()
-            before = {'identity': {'versionCode': 3040}, 'verificationStatus': 'runtime-verified-local'}
-            manifest = checkout / 'compatibility/targets.json'
+            (checkout / 'compatibility/wechat').mkdir(parents=True)
+            baseline_identity = dict(self.report['identity'], versionName='8.0.69', versionCode=3040,
+                                     apkSha256='b' * 64)
+            before = {'identity': baseline_identity,
+                      'sourceUrl': 'https://dldir1v6.qq.com/weixin/android/baseline.apk',
+                      'hooks': [{'id': 'tablet'}, {'id': 'login'}],
+                      'verificationStatus': 'runtime-verified-local'}
+            manifest = checkout / 'compatibility/wechat/targets.json'
             manifest.write_text(json.dumps([before, self.report['suggestedProfile']]))
             (checkout / 'code.txt').write_text('tested module code')
             git('add', '.')
@@ -103,10 +121,10 @@ class RuntimeTaskTest(unittest.TestCase):
             finally:
                 os.chdir(previous)
             git('fetch', '-q', 'origin', 'adapt/test')
-            promoted = json.loads(git('show', 'FETCH_HEAD:compatibility/targets.json'))
+            promoted = json.loads(git('show', 'FETCH_HEAD:compatibility/wechat/targets.json'))
             self.assertEqual(promoted[0], before)
             self.assertEqual(promoted[1]['verificationStatus'], 'runtime-verified-hosted')
-            self.assertEqual(git('diff', '--name-only', head, 'FETCH_HEAD'), 'compatibility/targets.json')
+            self.assertEqual(git('diff', '--name-only', head, 'FETCH_HEAD'), 'compatibility/wechat/targets.json')
             self.assertEqual(git('rev-parse', 'FETCH_HEAD^'), head)
 
     def test_changed_pr_head_cannot_be_promoted(self):

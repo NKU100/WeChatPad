@@ -1,6 +1,7 @@
 import argparse
 import hashlib
 import html
+import importlib
 import json
 import re
 import sys
@@ -9,6 +10,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
+from scripts.ci.app_policy import get_policy
 
 OFFICIAL_PAGE = "https://weixin.qq.com/"
 OFFICIAL_HOST = "dldir1v6.qq.com"
@@ -34,35 +36,40 @@ class Candidate:
     version_code: int
 
 
-def validate_official_apk_url(url: str) -> None:
+def validate_official_apk_url(url: str, official_apk_prefix: str = "https://dldir1v6.qq.com/weixin/android/") -> None:
     parsed = urlsplit(url)
+    prefix = urlsplit(official_apk_prefix)
     try:
         port = parsed.port
     except ValueError as error:
         raise ValueError("Invalid official Tencent CDN URL") from error
     if (
         parsed.scheme != "https"
-        or parsed.hostname != OFFICIAL_HOST
+        or parsed.hostname != prefix.hostname
         or parsed.username is not None
         or parsed.password is not None
         or port is not None
-        or not parsed.path.startswith(DOWNLOAD_PATH)
-        or not re.fullmatch(r"/weixin/android/[A-Za-z0-9._-]+[.]apk", parsed.path)
+        or not parsed.path.startswith(prefix.path)
+        or not re.fullmatch(re.escape(prefix.path) + r"[A-Za-z0-9._-]+[.]apk", parsed.path)
         or parsed.query
         or parsed.fragment
     ):
         raise ValueError("URL is outside the official Tencent CDN APK directory")
 
 
-def discover_from_html(page_html: str) -> Candidate:
+def discover_from_html(page_html: str, official_apk_prefix: str = "https://dldir1v6.qq.com/weixin/android/") -> Candidate:
     normalized_html = html.unescape(page_html).replace("\\/", "/")
-    urls = set(APK_URL_PATTERN.findall(normalized_html))
+    parsed_prefix = urlsplit(official_apk_prefix)
+    url_pattern = re.compile(
+        re.escape(official_apk_prefix) + r"[A-Za-z0-9._-]+[.]apk", re.IGNORECASE,
+    )
+    urls = set(url_pattern.findall(normalized_html))
     candidates: dict[str, Candidate] = {}
 
     for url in urls:
-        validate_official_apk_url(url)
+        validate_official_apk_url(url, official_apk_prefix)
         filename = urlsplit(url).path.rsplit("/", 1)[-1]
-        match = ARM64_FILENAME_PATTERN.fullmatch(filename)
+        match = ARM64_FILENAME_PATTERN.fullmatch(filename) if parsed_prefix.hostname == OFFICIAL_HOST else None
         if match is None:
             continue
         candidates[url] = Candidate(
@@ -120,16 +127,20 @@ def append_github_output(path: Path, values: dict[str, str]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--targets", type=Path, required=True)
+    parser.add_argument("--app-id", default="wechat")
+    parser.add_argument("--targets", type=Path)
     parser.add_argument("--github-output", type=Path, required=True)
     parser.add_argument("--report", type=Path, required=True)
     arguments = parser.parse_args()
+    policy = get_policy(arguments.app_id)
+    targets_path = arguments.targets or Path(policy.targets_path)
 
     try:
-        candidate = discover_from_html(fetch_official_page())
-        expected_sha256 = expected_sha256_for_url(arguments.targets, candidate.url)
+        strategy = importlib.import_module(policy.discovery_strategy)
+        candidate = strategy.discover(policy)
+        expected_sha256 = expected_sha256_for_url(targets_path, candidate.url)
         url_sha256 = hashlib.sha256(candidate.url.encode("utf-8")).hexdigest()
-        cache_dir = f".cache/wechatpad-latest/{url_sha256}"
+        cache_dir = f".cache/{policy.artifact_prefix}-{policy.app_id}-latest/{url_sha256}"
         outputs = {
             "source_url": candidate.url,
             "filename": candidate.filename,
@@ -138,7 +149,8 @@ def main() -> int:
             "expected_sha256": expected_sha256,
             "url_sha256": url_sha256,
             "cache_dir": cache_dir,
-            "cache_key": f"wechatpad-latest-url-{url_sha256}",
+            "app_id": policy.app_id,
+            "cache_key": f"{policy.artifact_prefix}-{policy.app_id}-latest-url-{url_sha256}",
         }
         append_github_output(arguments.github_output, outputs)
         with arguments.report.open("a", encoding="utf-8") as report:

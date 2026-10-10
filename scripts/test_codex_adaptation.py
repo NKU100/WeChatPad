@@ -11,9 +11,9 @@ from scripts.ci.codex_adaptation import candidate_key, eligible_candidate, valid
 
 class CodexAdaptationTest(unittest.TestCase):
     def setUp(self):
-        self.targets = json.loads(Path('compatibility/targets.json').read_text())
+        self.targets = json.loads(Path('compatibility/wechat/targets.json').read_text())
         self.identity = dict(self.targets[-1]['identity'], versionName='8.0.80', versionCode=3220, apkSha256='a' * 64)
-        self.report = {'identity': self.identity, 'status': 'NEEDS_HOOK_REVIEW',
+        self.report = {'appId': 'wechat', 'identity': self.identity, 'status': 'NEEDS_HOOK_REVIEW',
                        'sourceUrl': 'https://dldir1v6.qq.com/weixin/android/weixin8080android3220_arm64.apk'}
         self.profile = copy.deepcopy(self.targets[-1])
         self.profile.update(identity=self.identity, sourceUrl=self.report['sourceUrl'], verificationStatus='static-verified')
@@ -31,8 +31,8 @@ class CodexAdaptationTest(unittest.TestCase):
                 file = repository / path
                 file.parent.mkdir(parents=True, exist_ok=True)
                 file.write_text('synthetic')
-            targets = repository / 'compatibility/targets.json'
-            targets.parent.mkdir()
+            targets = repository / 'compatibility/wechat/targets.json'
+            targets.parent.mkdir(parents=True)
             targets.write_text(json.dumps(self.targets))
             (repository / 'old-answer.md').write_text('historical adaptation')
             subprocess.run(['git', 'add', '.'], cwd=repository, check=True)
@@ -72,7 +72,7 @@ class CodexAdaptationTest(unittest.TestCase):
         self.assertTrue(eligible_candidate(self.report, self.targets))
         self.report['status'] = 'STATIC_VERIFIED_PENDING_RUNTIME'
         self.assertTrue(eligible_candidate(self.report, self.targets))
-        self.assertEqual('3220-' + 'a' * 64, candidate_key(self.report))
+        self.assertEqual('wechat-com.tencent.mm-arm64-v8a-3220-' + 'a' * 64, candidate_key(self.report))
 
     def test_older_unknown_build_cannot_bypass_the_latest_only_gate(self):
         baseline_code = max(p['identity']['versionCode'] for p in self.targets)
@@ -116,10 +116,20 @@ class CodexAdaptationTest(unittest.TestCase):
         self.profile['identity'] = dict(self.identity, apkSha256='c' * 64)
         with self.assertRaisesRegex(ValueError, 'identity'):
             validate_profiles(self.targets, self.targets + [self.profile], self.report)
-        validate_paths(['compatibility/targets.json', 'compat-core/src/main/kotlin/Hook.kt'])
-        for path in ['.github/workflows/build.yml', 'scripts/ci/codex_adaptation.py', 'gradle.properties', 'compat-checker/src/main/kotlin/Main.kt']:
+        validate_paths(['compatibility/wechat/targets.json', 'compat-core/src/main/kotlin/io/github/nku100/wechatpad/compat/CandidatePipeline.kt'])
+        for path in ['compatibility/targets.json', 'compatibility/qq/targets.json', '.github/workflows/build.yml', 'scripts/ci/codex_adaptation.py', 'gradle.properties', 'compat-checker/src/main/kotlin/Main.kt', 'compat-core/src/main/kotlin/io/github/nku100/wechatpad/compat/Unexpected.kt']:
             with self.assertRaisesRegex(ValueError, 'allowed'):
                 validate_paths([path])
+
+    def test_explicit_unknown_app_and_cross_app_profile_fail_closed(self):
+        report = copy.deepcopy(self.report)
+        report['appId'] = 'qq'
+        with self.assertRaisesRegex(ValueError, 'Unknown or unregistered appId'):
+            eligible_candidate(report, self.targets)
+        report = copy.deepcopy(self.report)
+        report['identity']['packageName'] = 'org.example.other'
+        with self.assertRaisesRegex(ValueError, 'package'):
+            eligible_candidate(report, self.targets)
 
     def test_model_has_no_custom_execution_timeout(self):
         with tempfile.TemporaryDirectory() as temp, patch('scripts.ci.codex_adaptation.subprocess.Popen') as launch:

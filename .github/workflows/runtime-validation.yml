@@ -7,6 +7,10 @@ on:
         description: Rebuild pinned ramdisk from official inputs and verify byte-for-byte reproduction
         type: boolean
         default: false
+      app_id:
+        description: Registered application policy to replay
+        type: string
+        default: wechat
 
 permissions:
   contents: read
@@ -15,8 +19,17 @@ permissions:
 jobs:
   prepare:
     runs-on: ubuntu-latest
+    outputs:
+      app_id: ${{ steps.policy.outputs.app_id }}
+      targets_path: ${{ steps.policy.outputs.targets_path }}
+      artifact_prefix: ${{ steps.policy.outputs.artifact_prefix }}
+    env:
+      APP_ID: ${{ inputs.app_id || 'wechat' }}
     steps:
       - uses: actions/checkout@v7
+      - name: Resolve trusted application policy
+        id: policy
+        run: python3 -m scripts.ci.app_policy --app-id "$APP_ID" --github-output "$GITHUB_OUTPUT"
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
@@ -30,22 +43,24 @@ jobs:
       - name: Prepare registered replay candidate
         run: |
           python3 -m scripts.ci.candidate_selection \
+            --app-id "$APP_ID" \
+            --targets "$TARGETS_PATH" \
             --directory runtime-inputs
       - name: Check real APK and build replay module
         run: |
-          ./gradlew --no-daemon :compat-checker:run --args='check --targets compatibility/targets.json --apk runtime-inputs/wechat.apk'
+          ./gradlew --no-daemon :compat-checker:run --args="check --app-id $APP_ID --targets $TARGETS_PATH --apk runtime-inputs/$APP_ID.apk"
           ./gradlew --no-daemon :app:assembleDebug
           cp app/build/outputs/apk/debug/app-debug.apk runtime-inputs/app-debug.apk
       - uses: actions/upload-artifact@v7
         with:
-          name: wechatpad-adapted-module
+          name: ${{ steps.policy.outputs.artifact_prefix }}-${{ steps.policy.outputs.app_id }}-adapted-module
           path: runtime-inputs/app-debug.apk
           retention-days: 7
       - uses: actions/upload-artifact@v7
         with:
-          name: wechatpad-runtime-candidate
+          name: ${{ steps.policy.outputs.artifact_prefix }}-${{ steps.policy.outputs.app_id }}-runtime-candidate
           path: |
-            runtime-inputs/wechat.apk
+            runtime-inputs/${{ inputs.app_id || 'wechat' }}.apk
             runtime-inputs/candidate-report.json
           retention-days: 7
 
@@ -53,25 +68,29 @@ jobs:
     needs: prepare
     uses: ./.github/workflows/runtime-smoke.yml
     with:
+      app_id: ${{ inputs.app_id || 'wechat' }}
       module_run_id: ${{ github.run_id }}
-      module_artifact: wechatpad-adapted-module
-      candidate_artifact: wechatpad-runtime-candidate
+      module_artifact: ${{ needs.prepare.outputs.artifact_prefix }}-${{ needs.prepare.outputs.app_id }}-adapted-module
+      candidate_artifact: ${{ needs.prepare.outputs.artifact_prefix }}-${{ needs.prepare.outputs.app_id }}-runtime-candidate
       rebuild_ramdisk: ${{ inputs.rebuild_ramdisk }}
 
   result:
     needs: [prepare, runtime]
     if: always() && needs.prepare.result == 'success'
     runs-on: ubuntu-latest
+    env:
+      APP_ID: ${{ needs.prepare.outputs.app_id }}
+      ARTIFACT_PREFIX: ${{ needs.prepare.outputs.artifact_prefix }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
-          name: wechatpad-runtime-candidate
+          name: ${{ needs.prepare.outputs.artifact_prefix }}-${{ needs.prepare.outputs.app_id }}-runtime-candidate
           path: runtime-result
       - uses: actions/download-artifact@v8
         continue-on-error: true
         with:
-          name: wechatpad-runtime-smoke
+          name: ${{ needs.prepare.outputs.artifact_prefix }}-${{ needs.prepare.outputs.app_id }}-runtime-smoke
           path: runtime-result/evidence
       - name: Validate pipeline acceptance without publishing support
         env:
@@ -84,7 +103,7 @@ jobs:
           directory = Path('runtime-result')
           evidence = directory / 'evidence/runtime-smoke/evidence/smoke-report.json'
           smoke = json.loads(evidence.read_text()) if evidence.is_file() else {}
-          report = runtime_result(json.loads((directory / 'candidate-report.json').read_text()), smoke, os.environ['SMOKE_CONCLUSION'])
+          report = runtime_result(json.loads((directory / 'candidate-report.json').read_text()), smoke, os.environ['SMOKE_CONCLUSION'], os.environ['APP_ID'])
           (directory / 'runtime-candidate-report.json').write_text(json.dumps(report, indent=2) + '\n')
           with Path(os.environ['GITHUB_STEP_SUMMARY']).open('a') as summary:
               summary.write(f'## Replay result\n\n`{report["status"]}`\n\nNo Codex invocation, PR or formal support update.\n')
@@ -93,6 +112,6 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: wechatpad-runtime-result
+          name: ${{ needs.prepare.outputs.artifact_prefix }}-${{ needs.prepare.outputs.app_id }}-runtime-result
           path: runtime-result/runtime-candidate-report.json
           retention-days: 14

@@ -7,6 +7,7 @@ import re
 import subprocess
 from pathlib import Path
 
+from scripts.ci.app_policy import get_policy, policy_for_report
 from scripts.ci.codex_adaptation import candidate_key, eligible_candidate
 from scripts.ci.discover_latest_wechat import append_github_output
 
@@ -44,8 +45,9 @@ def gh(*args):
 
 def issue_body(report, status, run_url, pr_url=""):
     identity = report["identity"]
+    policy = policy_for_report(report)
     lines = [f"<!-- wechatpad-adaptation:{candidate_key(report)} -->", f"Status: `{status}`", "",
-             f"WeChat {identity['versionName']} ({identity['versionCode']})", f"APK SHA-256: `{identity['apkSha256']}`",
+             f"{policy.display_name} {identity['versionName']} ({identity['versionCode']})", f"APK SHA-256: `{identity['apkSha256']}`",
              f"Source: {report['sourceUrl']}", f"Run: {run_url}", "",
              "Model: `gpt-6-luna`; reasoning: `xhigh`; automatic retries disabled; manual retry available."]
     if pr_url:
@@ -61,9 +63,10 @@ def write_issue(repo, issue, body, directory):
     return gh("issue", "edit", str(issue), "--repo", repo, "--body-file", str(path))
 
 
-def claim(repo, report, targets, directory, run_url, retry=False):
+def claim(repo, report, targets, directory, run_url, retry=False, app_id=None):
     directory.mkdir(parents=True, exist_ok=True)
-    if not eligible_candidate(report, targets):
+    policy = policy_for_report(report, app_id)
+    if not eligible_candidate(report, targets, policy.app_id):
         raise ValueError("Only verified, unknown candidate builds may start an adaptation")
     key = candidate_key(report)
     pages = json.loads(gh("api", "--paginate", "--slurp", f"repos/{repo}/issues?state=all&per_page=100"))
@@ -73,7 +76,7 @@ def claim(repo, report, targets, directory, run_url, retry=False):
     previous = existing_attempt(issues, key)
     if previous is None:
         previous = next((issue for issue in issues if trusted_attempt(issue) and marker in (issue.get("body") or "")), None)
-    gh("label", "create", ADAPTATION_LABEL, "--repo", repo, "--color", "1D76DB", "--description", "WeChat adaptation pipeline record", "--force")
+    gh("label", "create", ADAPTATION_LABEL, "--repo", repo, "--color", "1D76DB", "--description", f"{policy.display_name} adaptation pipeline record", "--force")
     if previous:
         gh("issue", "edit", str(previous["number"]), "--repo", repo, "--add-label", ADAPTATION_LABEL)
         body_text = previous.get("body") or ""
@@ -93,22 +96,25 @@ def claim(repo, report, targets, directory, run_url, retry=False):
         return
     body = directory / "issue-body.md"
     body.write_text(issue_body(report, "ADAPTATION_RUNNING", run_url))
-    url = gh("issue", "create", "--repo", repo, "--title", f"Adapt WeChat {report['identity']['versionName']} ({key})", "--body-file", str(body), "--label", ADAPTATION_LABEL)
+    url = gh("issue", "create", "--repo", repo, "--title", f"Adapt {policy.display_name} {report['identity']['versionName']} ({key})", "--body-file", str(body), "--label", ADAPTATION_LABEL)
     number = int(url.rsplit("/", 1)[1])
     append_github_output(Path(os.environ["GITHUB_OUTPUT"]), {"claimed": "true", "issue": str(number)})
     print(f"Claimed one adaptation attempt: #{number}")
 
 
-def publish(repo, directory, issue, run_url):
+def publish(repo, directory, issue, run_url, app_id=None):
     state = json.loads((directory / "state.json").read_text())
     report = json.loads((directory / "candidate-report.json").read_text())
+    policy = policy_for_report(report, app_id or state.get("appId"))
+    if state.get("appId", "wechat") != policy.app_id:
+        raise ValueError("Adaptation state appId does not match the candidate report")
     if report["status"] != "STATIC_VERIFIED_PENDING_RUNTIME":
         raise ValueError("Draft PR requires successful candidate and regression checks")
     key = candidate_key(report)
     run_id = re.fullmatch(r"https://github\.com/" + re.escape(repo) + r"/actions/runs/(\d+)", run_url)
     if run_id is None:
         raise ValueError("Publication requires a valid workflow run URL")
-    branch = "adapt/wechat-" + key + "-run-" + run_id[1]
+    branch = f"adapt/{policy.app_id}-" + key + "-run-" + run_id[1]
     checkout = Path(os.environ["GITHUB_WORKSPACE"])
     head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=checkout).decode().strip()
     current_main = gh("api", f"repos/{repo}/git/ref/heads/main", "--jq", ".object.sha")
@@ -118,16 +124,16 @@ def publish(repo, directory, issue, run_url):
     subprocess.run(["git", "apply", "--index", str(directory / "adaptation.patch")], cwd=checkout, check=True)
     subprocess.run(["git", "config", "user.name", "NKU100"], cwd=checkout, check=True)
     subprocess.run(["git", "config", "user.email", "21164383+NKU100@users.noreply.github.com"], cwd=checkout, check=True)
-    subprocess.run(["git", "commit", "-m", f"feat: support WeChat {report['identity']['versionName']}"], cwd=checkout, check=True)
+    subprocess.run(["git", "commit", "-m", f"feat: support {policy.display_name} {report['identity']['versionName']}"], cwd=checkout, check=True)
     subprocess.run(["git", "push", "origin", "HEAD:refs/heads/" + branch], cwd=checkout, check=True)
     body = directory / "pr-body.md"
     versions = ", ".join(report["checkedVersions"])
-    body.write_text(f"Adds the verified WeChat {report['identity']['versionName']} build as a static-verified profile.\n\n"
+    body.write_text(f"Adds the verified {policy.display_name} {report['identity']['versionName']} build as a static-verified profile.\n\n"
                     f"The shared checker passed for: {versions}. Shared-core and module tests and the debug APK build passed.\n\n"
-                    "Hosted runtime smoke will check module injection, the Phone & Tablet entry and QR page before this PR is ready.\n\n"
+                    f"Hosted runtime smoke will verify {policy.display_name} hook installation and the policy-specific login page before this PR is ready.\n\n"
                     f"[Adaptation run]({run_url}); tracks #{issue}.\n")
     url = gh("pr", "create", "--repo", repo, "--base", "main", "--head", branch, "--draft",
-             "--title", f"feat: support WeChat {report['identity']['versionName']}", "--body-file", str(body))
+             "--title", f"feat: support {policy.display_name} {report['identity']['versionName']}", "--body-file", str(body))
     write_issue(repo, issue, issue_body(report, "WAITING_RUNTIME", run_url, url), directory)
     append_github_output(Path(os.environ["GITHUB_OUTPUT"]), {"pipeline_status": "WAITING_RUNTIME", "pr_url": url, "head_sha": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=checkout).decode().strip()})
     print(url)
@@ -139,17 +145,22 @@ def main():
     parser.add_argument("--report", type=Path)
     parser.add_argument("--targets", type=Path)
     parser.add_argument("--directory", type=Path, required=True)
+    parser.add_argument("--app-id", default="wechat")
     parser.add_argument("--issue", type=int)
     parser.add_argument("--retry", action="store_true")
     args = parser.parse_args()
+    policy = get_policy(args.app_id)
     repo = os.environ["GITHUB_REPOSITORY"]
     run_url = f"https://github.com/{repo}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
     if args.stage == "claim":
-        claim(repo, json.loads(args.report.read_text()), json.loads(args.targets.read_text()), args.directory, run_url, retry=args.retry)
+        claim(repo, json.loads(args.report.read_text()), json.loads(args.targets.read_text()), args.directory, run_url, retry=args.retry, app_id=policy.app_id)
     elif args.stage == "publish":
-        publish(repo, args.directory, args.issue, run_url)
+        state = json.loads((args.directory / "state.json").read_text())
+        policy = get_policy(state.get("appId"))
+        publish(repo, args.directory, args.issue, run_url, policy.app_id)
     else:
         report = json.loads(args.report.read_text())
+        policy_for_report(report, policy.app_id)
         report.update(status="NEEDS_HOOK_REVIEW", suggestedProfile=None,
                       blockers=["Codex adaptation or static validation failed. See the run steps; no automatic retry is scheduled."])
         (args.directory / "candidate-report.json").write_text(json.dumps(report, indent=2) + "\n")

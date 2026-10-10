@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import patch
 import subprocess
 import tempfile
+import zipfile
 from contextlib import ExitStack, redirect_stdout
 import io
 
@@ -13,6 +14,22 @@ spec.loader.exec_module(smoke)
 
 
 class UiEvidenceTest(unittest.TestCase):
+    def test_candidate_abi_is_read_from_apk_and_rejects_mixed_or_unsupported_native_abis(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            apk = Path(temporary) / 'candidate.apk'
+            with zipfile.ZipFile(apk, 'w') as archive:
+                archive.writestr('lib/arm64-v8a/libmodule.so', b'arm64')
+            self.assertEqual('arm64-v8a', smoke.apk_native_abi(apk))
+            with zipfile.ZipFile(apk, 'w') as archive:
+                archive.writestr('lib/x86_64/libmodule.so', b'x86')
+            with self.assertRaisesRegex(ValueError, 'unsupported'):
+                smoke.apk_native_abi(apk)
+            with zipfile.ZipFile(apk, 'w') as archive:
+                archive.writestr('lib/arm64-v8a/libmodule.so', b'arm64')
+                archive.writestr('lib/x86_64/libmodule.so', b'x86')
+            with self.assertRaisesRegex(ValueError, 'exactly one'):
+                smoke.apk_native_abi(apk)
+
     def test_page_size_backcompat_is_enabled_before_each_launch(self):
         with patch.object(smoke, "su") as root:
             smoke.enable_page_size_backcompat()

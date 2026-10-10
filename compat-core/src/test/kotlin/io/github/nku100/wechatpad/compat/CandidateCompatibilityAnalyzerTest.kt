@@ -170,6 +170,7 @@ class CandidateCompatibilityAnalyzerTest {
         val report = CandidateCompatibilityAnalyzer.analyzeRegistered(
             identity = CANDIDATE_IDENTITY,
             target = registered79(),
+            requiredHookIds = setOf("tablet", "login"),
             facts = candidateFacts(),
             checkedVersions = listOf("8.0.69", "8.0.78", "8.0.90"),
             regressionPassed = true,
@@ -199,6 +200,7 @@ class CandidateCompatibilityAnalyzerTest {
         val report = CandidateCompatibilityAnalyzer.analyzeRegistered(
             identity = CANDIDATE_IDENTITY,
             target = registered79(),
+            requiredHookIds = setOf("tablet", "login"),
             facts = candidateFacts(),
             checkedVersions = listOf("8.0.69", "8.0.78", "8.0.90"),
             regressionPassed = true,
@@ -217,6 +219,7 @@ class CandidateCompatibilityAnalyzerTest {
     ) = CandidateCompatibilityAnalyzer.analyze(
         identity = identity,
         baseline = baseline,
+        requiredHookIds = setOf("tablet", "login"),
         facts = facts,
         checkedVersions = checkedVersions,
         regressionPassed = regressionPassed,

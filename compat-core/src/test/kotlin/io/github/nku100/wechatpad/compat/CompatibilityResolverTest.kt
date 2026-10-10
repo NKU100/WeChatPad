@@ -44,6 +44,18 @@ class CompatibilityResolverTest {
     }
 
     @Test
+    fun acceptsASecondTrustedPolicyWithItsOwnRequiredHooks() {
+        val hooks = listOf(TABLET_RULE.copy(id = "route"), LOGIN_RULE.copy(id = "session"))
+        val result = resolve(
+            target = target(hooks = hooks),
+            requiredHookIds = setOf("route", "session"),
+        )
+
+        assertEquals(CompatibilityStatus.COMPATIBLE, result.status)
+        assertEquals(setOf("route", "session"), result.resolvedDescriptors.keys)
+    }
+
+    @Test
     fun rejectsAProfileWithDuplicateHookIds() {
         val result = resolve(target = target(hooks = listOf(TABLET_RULE, TABLET_RULE, LOGIN_RULE)))
 
@@ -211,21 +223,25 @@ class CompatibilityResolverTest {
         verification: IdentityVerification = IdentityVerification.STATIC_APK,
         target: CompatibilityTarget = target(),
         facts: List<DexMethodFact> = validFacts(),
+        requiredHookIds: Set<String> = setOf("tablet", "login"),
     ): CompatibilityResult = CompatibilityResolver.resolve(
         identity = identity,
         verification = verification,
         targets = listOf(target),
         facts = facts,
+        requiredHookIds = requiredHookIds,
     )
 
     private fun resolveCandidate(
         identity: BuildIdentity,
         targets: List<CompatibilityTarget> = listOf(target()),
         facts: List<DexMethodFact> = validFacts(),
+        requiredHookIds: Set<String> = setOf("tablet", "login"),
     ): CompatibilityResult = CompatibilityResolver.resolveStaticCandidate(
         identity = identity,
         targets = targets,
         facts = facts,
+        requiredHookIds = requiredHookIds,
     )
 
     private fun target(

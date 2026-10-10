@@ -7,14 +7,14 @@ import io.github.libxposed.api.XposedModuleInterface.ModuleLoadedParam
 import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
 import io.github.nku100.wechatpad.compat.CompatibilityStatus
 import io.github.nku100.wechatpad.compat.CompatibilityTarget
-import io.github.nku100.wechatpad.runtime.HookInstaller
+import io.github.nku100.wechatpad.apps.wechat.WeChatAppAdapter
+import io.github.nku100.wechatpad.runtime.AppAdapter
+import io.github.nku100.wechatpad.runtime.AppAdapterRegistry
 import io.github.nku100.wechatpad.runtime.InstalledBuildIdentityReader
-import io.github.nku100.wechatpad.runtime.InstallOutcome
 import io.github.nku100.wechatpad.runtime.LibXposedHookRegistrar
 import io.github.nku100.wechatpad.runtime.RuntimeCompatibilityResolver
 import io.github.nku100.wechatpad.runtime.RuntimeResolutionCache
-import io.github.nku100.wechatpad.runtime.TargetMethodResolver
-import io.github.nku100.wechatpad.runtime.TinkerClassLoaderBridge
+import io.github.nku100.wechatpad.runtime.ModuleLog
 import java.io.File
 import java.nio.charset.StandardCharsets
 import java.util.zip.ZipFile
@@ -22,7 +22,8 @@ import kotlinx.serialization.json.Json
 
 class WeChatPadModule : XposedModule() {
     private var currentProcessName: String? = null
-    private var packageHandled = false
+    private val handledPackages = mutableSetOf<String>()
+    private val adapters = AppAdapterRegistry(listOf(WeChatAppAdapter()))
 
     override fun onModuleLoaded(param: ModuleLoadedParam) {
         super.onModuleLoaded(param)
@@ -31,28 +32,30 @@ class WeChatPadModule : XposedModule() {
 
     override fun onPackageLoaded(param: PackageLoadedParam) {
         super.onPackageLoaded(param)
-        if (packageHandled || param.packageName != WECHAT_PACKAGE) return
+        if (param.packageName in handledPackages) return
+        val adapter = adapters.forPackage(param.packageName) ?: return
 
         val processName = currentProcessName
-        if (processName != WECHAT_PACKAGE) {
-            log(Log.INFO, "$WECHAT_PACKAGE process skipped: ${processName ?: "unknown"}")
+        if (adapters.find(param.packageName, processName) == null) {
+            log(Log.INFO, "${adapter.packageName} process skipped: ${processName ?: "unknown"}")
             return
         }
-        packageHandled = true
+        handledPackages += param.packageName
 
         try {
-            initializeForWeChat(param.applicationInfo, param.defaultClassLoader)
+            initialize(adapter, param.applicationInfo, param.defaultClassLoader)
         } catch (error: Throwable) {
             logFailure("module initialization failed", error)
         }
     }
 
-    private fun initializeForWeChat(applicationInfo: ApplicationInfo, defaultClassLoader: ClassLoader) {
+    private fun initialize(adapter: AppAdapter, applicationInfo: ApplicationInfo, defaultClassLoader: ClassLoader) {
         val build = InstalledBuildIdentityReader().read(applicationInfo)
-        val targets = readTargets()
+        val targets = readTargets(adapter.targetsAssetPath)
         val cacheDirectory = File(build.dataDirectory, "files/wechatpad/compatibility")
         val resolution = RuntimeCompatibilityResolver(
             targets = targets,
+            policy = adapter.compatibilityPolicy,
             cache = RuntimeResolutionCache(cacheDirectory),
         ).resolve(build)
 
@@ -67,39 +70,22 @@ class WeChatPadModule : XposedModule() {
         )
         if (resolution.result.status != CompatibilityStatus.COMPATIBLE || target == null) return
 
-        val tabletDescriptor = checkNotNull(resolution.result.resolvedDescriptors["tablet"]) {
-            "Compatible result did not include the tablet descriptor"
-        }
-        val loginDescriptor = checkNotNull(resolution.result.resolvedDescriptors["login"]) {
-            "Compatible result did not include the login descriptor"
-        }
-        val registrar = LibXposedHookRegistrar(this)
-        val bridge = TinkerClassLoaderBridge(registrar)
-        bridge.install(defaultClassLoader) { tinkerClassLoader ->
-            try {
-                val tabletMethod = TargetMethodResolver.resolve(tinkerClassLoader, tabletDescriptor)
-                val loginMethod = TargetMethodResolver.resolve(tinkerClassLoader, loginDescriptor)
-                log(Log.INFO, "resolved tablet=$tabletDescriptor login=$loginDescriptor")
-                when (val outcome = HookInstaller(registrar).install(tabletMethod, loginMethod)) {
-                    is InstallOutcome.Installed ->
-                        log(Log.INFO, "installed ${outcome.registrations.size} WeChat hooks")
-
-                    is InstallOutcome.Failed ->
-                        log(Log.ERROR, "hook installation failed: ${outcome.reason}")
-                }
-            } catch (error: Throwable) {
-                logFailure("post-Tinker method resolution failed", error)
-            }
-        }
-        log(Log.INFO, "waiting for Tinker class loader")
+        adapter.install(
+            defaultClassLoader,
+            resolution.result.resolvedDescriptors,
+            LibXposedHookRegistrar(this),
+            ModuleLog { priority, message, error ->
+                if (error == null) log(priority, message) else log(priority, LOG_TAG, message, error)
+            },
+        )
     }
 
-    private fun readTargets(): List<CompatibilityTarget> {
+    private fun readTargets(assetPath: String): List<CompatibilityTarget> {
         val moduleApk = checkNotNull(getModuleApplicationInfo().sourceDir) {
             "Module APK path was null"
         }
         return ZipFile(moduleApk).use { apk ->
-            val profile = checkNotNull(apk.getEntry(TARGETS_ASSET_PATH)) {
+            val profile = checkNotNull(apk.getEntry(assetPath)) {
                 "Compatibility profiles were missing from the module APK"
             }
             val json = apk.getInputStream(profile).bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
@@ -117,8 +103,6 @@ class WeChatPadModule : XposedModule() {
     }
 
     private companion object {
-        const val WECHAT_PACKAGE = "com.tencent.mm"
-        const val TARGETS_ASSET_PATH = "assets/compatibility/targets.json"
         const val LOG_TAG = "WeChatPad"
     }
 }

@@ -4,6 +4,7 @@ import java.util.zip.ZipFile
 import org.gradle.api.DefaultTask
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.RegularFileProperty
+import org.gradle.api.tasks.InputDirectory
 import org.gradle.api.tasks.InputFile
 import org.gradle.api.tasks.OutputDirectory
 import org.gradle.api.tasks.PathSensitive
@@ -42,18 +43,28 @@ if (!hasStableSigningKey && disposableDebugKey == null) {
 }
 
 abstract class GenerateCompatibilityTargets : DefaultTask() {
-    @get:InputFile
+    @get:InputDirectory
     @get:PathSensitive(PathSensitivity.RELATIVE)
-    abstract val sourceFile: RegularFileProperty
+    abstract val sourceDirectory: DirectoryProperty
 
     @get:OutputDirectory
     abstract val outputDirectory: DirectoryProperty
 
     @TaskAction
     fun generate() {
-        val destination = outputDirectory.file("compatibility/targets.json").get().asFile
-        destination.parentFile.mkdirs()
-        sourceFile.get().asFile.copyTo(destination, overwrite = true)
+        outputDirectory.get().asFile.deleteRecursively()
+        val compatibilityRoot = sourceDirectory.get().asFile
+        compatibilityRoot.listFiles()?.filter { it.isDirectory }?.sortedBy { it.name }?.forEach { appDirectory ->
+            require(Regex("[a-z][a-z0-9_-]*").matches(appDirectory.name)) {
+                "Invalid application policy directory: ${appDirectory.name}"
+            }
+            val source = appDirectory.resolve("targets.json")
+            if (source.isFile) {
+                val destination = outputDirectory.file("compatibility/${appDirectory.name}/targets.json").get().asFile
+                destination.parentFile.mkdirs()
+                source.copyTo(destination, overwrite = true)
+            }
+        }
     }
 }
 
@@ -114,7 +125,7 @@ androidComponents {
         val task = tasks.register<GenerateCompatibilityTargets>(
             "generate${variant.name.replaceFirstChar(Char::uppercase)}CompatibilityTargets",
         ) {
-            sourceFile.set(rootProject.layout.projectDirectory.file("compatibility/targets.json"))
+            sourceDirectory.set(rootProject.layout.projectDirectory.dir("compatibility"))
             outputDirectory.set(layout.buildDirectory.dir("generated/compatibility-assets/${variant.name}"))
         }
         checkNotNull(variant.sources.assets).addGeneratedSourceDirectory(
@@ -196,16 +207,21 @@ tasks.register("verifyModuleMetadata") {
                 "Unexpected module entry point: $entryClasses"
             }
 
-            val targetEntries = archive.entries().asSequence()
-                .filter { it.name == "assets/compatibility/targets.json" }
+            val sourceTargets = rootProject.file("compatibility").walkTopDown()
+                .filter { it.isFile && it.name == "targets.json" && it.parentFile.parentFile == rootProject.file("compatibility") }
                 .toList()
-            check(targetEntries.size == 1) {
-                "Expected exactly one packaged compatibility profile file, found ${targetEntries.size}"
+            val packagedTargets = archive.entries().asSequence()
+                .filter { it.name.matches(Regex("assets/compatibility/[a-z][a-z0-9_-]*/targets\\.json")) }
+                .associateBy { it.name.removePrefix("assets/") }
+            check(packagedTargets.keys == sourceTargets.map { "compatibility/${it.parentFile.name}/targets.json" }.toSet()) {
+                "Packaged compatibility policy directories differ from compatibility/"
             }
-            val packagedTargets = archive.getInputStream(targetEntries.single()).use { it.readBytes() }
-            val sourceTargets = rootProject.file("compatibility/targets.json").readBytes()
-            check(packagedTargets.contentEquals(sourceTargets)) {
-                "Packaged compatibility profiles differ from compatibility/targets.json"
+            for (source in sourceTargets) {
+                val assetPath = "compatibility/${source.parentFile.name}/targets.json"
+                val packagedBytes = archive.getInputStream(packagedTargets.getValue(assetPath)).use { it.readBytes() }
+                check(packagedBytes.contentEquals(source.readBytes())) {
+                    "Packaged profiles differ from $assetPath"
+                }
             }
         }
     }
