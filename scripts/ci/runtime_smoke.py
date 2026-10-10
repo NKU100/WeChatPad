@@ -10,9 +10,12 @@ from pathlib import Path
 import re
 import shlex
 import subprocess
+import sys
 import time
 import xml.etree.ElementTree as ET
 import zipfile
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.ci.app_policy import get_policy
 

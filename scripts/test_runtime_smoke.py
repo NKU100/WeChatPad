@@ -1,9 +1,11 @@
 import importlib.util
+import os
 from pathlib import Path
 import unittest
 from unittest.mock import patch
 import subprocess
 import tempfile
+import sys
 import zipfile
 from contextlib import ExitStack, redirect_stdout
 import io
@@ -14,6 +16,20 @@ spec.loader.exec_module(smoke)
 
 
 class UiEvidenceTest(unittest.TestCase):
+    def test_script_help_imports_from_clean_environment(self):
+        environment = os.environ.copy()
+        environment.pop('PYTHONPATH', None)
+        result = subprocess.run(
+            [sys.executable, 'scripts/ci/runtime_smoke.py', '--help'],
+            cwd=Path(__file__).resolve().parents[1],
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('--app-id APP_ID', result.stdout)
+
     def test_candidate_abi_is_read_from_apk_and_rejects_mixed_or_unsupported_native_abis(self):
         with tempfile.TemporaryDirectory() as temporary:
             apk = Path(temporary) / 'candidate.apk'
