@@ -4,11 +4,23 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from scripts.ci.discover_latest_wechat import discover_from_html, validate_official_apk_url
+from scripts.ci.discover_latest_wechat import discover_from_html, expected_sha256_for_url, validate_official_apk_url
 from scripts.ci.fetch_latest_wechat_apk import cache_matches
 
 
 class DiscoverLatestWechatTest(unittest.TestCase):
+    def test_url_with_multiple_registered_hashes_does_not_choose_a_variant(self):
+        import json
+        from pathlib import Path
+        with TemporaryDirectory() as temporary:
+            targets = Path(temporary) / 'targets.json'
+            url = 'https://dldir1v6.qq.com/weixin/android/repack.apk'
+            targets.write_text(json.dumps([
+                {'sourceUrl': url, 'identity': {'apkSha256': 'a' * 64}},
+                {'sourceUrl': url, 'identity': {'apkSha256': 'b' * 64}},
+            ]))
+            self.assertEqual('', expected_sha256_for_url(targets, url))
+
     def test_selects_unique_highest_official_arm64_build(self):
         html = """
         https://dldir1v6.qq.com/weixin/android/weixin8079android3200_0x28004f30_arm64.apk

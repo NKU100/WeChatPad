@@ -14,7 +14,7 @@ data class AppCompatibilityPolicy(
 ) {
     fun validateTargets(targets: List<CompatibilityTarget>) {
         require(targets.isNotEmpty()) { "Compatibility policy has no targets" }
-        val identities = mutableSetOf<Triple<String, String, Long>>()
+        val identities = mutableSetOf<List<String>>()
         targets.forEach { target ->
             validateIdentity(target.identity)
             require(target.identity.versionName.matches(Regex("[0-9]+(?:\\.[0-9]+)*"))) {
@@ -30,8 +30,13 @@ data class AppCompatibilityPolicy(
             require(target.hooks.all { it.stringAnchor.isNotBlank() && it.expectedDescriptor.isNotBlank() }) {
                 "Compatibility target hook anchors and descriptors must be non-empty"
             }
-            require(identities.add(Triple(target.identity.packageName, target.identity.abi, target.identity.versionCode))) {
-                "Duplicate package, ABI, and versionCode in compatibility policy"
+            require(identities.add(listOf(
+                target.identity.packageName,
+                target.identity.abi,
+                target.identity.versionCode.toString(),
+                requireNotNull(target.identity.apkSha256).lowercase(),
+            ))) {
+                "Duplicate compatibility profile identity"
             }
             validateSourceUrl(requireNotNull(target.sourceUrl) { "Compatibility target source URL is missing" })
         }

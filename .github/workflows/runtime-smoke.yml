@@ -100,11 +100,11 @@ jobs:
           path: work/runtime-smoke
           run-id: ${{ inputs.module_run_id }}
           github-token: ${{ github.token }}
-      - name: Verify exact candidate APK
-        if: inputs.candidate_artifact != ''
+      - name: Verify and stage exact candidate APK
         run: |
           python3 - <<'PYVERIFY'
           import hashlib, json, os
+          import shutil
           from pathlib import Path
           root = Path('work/runtime-smoke')
           report = json.loads((root / 'candidate-report.json').read_text())
@@ -113,9 +113,11 @@ jobs:
           assert report['status'] == 'STATIC_VERIFIED_PENDING_RUNTIME'
           expected = report['identity']
           assert expected['abi'] in policy.supported_abis
-          with (root / f"{policy.app_id}.apk").open('rb') as apk:
+          source = root / f"{policy.app_id}-{expected['apkSha256']}.apk"
+          with source.open('rb') as apk:
               digest = hashlib.file_digest(apk, 'sha256').hexdigest()
           assert digest == expected['apkSha256'], 'Candidate APK changed after static verification'
+          shutil.copyfile(source, root / f'{policy.app_id}.apk')
           PYVERIFY
       - name: Download and verify registered official app
         if: inputs.candidate_artifact == ''
@@ -123,6 +125,14 @@ jobs:
           python3 -m scripts.ci.candidate_selection \
             --app-id "$APP_ID" \
             --directory work/runtime-smoke
+          python3 - <<'PY'
+          import json, os, shutil
+          from pathlib import Path
+          root = Path('work/runtime-smoke')
+          report = json.loads((root / 'candidate-report.json').read_text())
+          identity = report['identity']
+          shutil.copyfile(root / f"{os.environ['APP_ID']}-{identity['apkSha256']}.apk", root / f"{os.environ['APP_ID']}.apk")
+          PY
       - name: Verify official APK signer
         run: |
           sdkmanager 'build-tools;37.0.0'

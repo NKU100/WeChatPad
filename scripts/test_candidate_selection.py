@@ -48,10 +48,13 @@ class CandidateSelectionTest(unittest.TestCase):
             root = Path(temporary)
             manifest = root / 'targets.json'
             manifest.write_text(json.dumps([self.profile]))
-            with patch('sys.argv', ['candidate_selection', '--targets', str(manifest), '--directory', str(root / 'inputs')]), patch('scripts.ci.apps.wechat.discovery_policy.fetch_official_page', return_value=latest):
+            unknown_apk = root / 'unknown.apk'
+            unknown_apk.write_bytes(b'new official repack')
+            digest = hashlib.sha256(unknown_apk.read_bytes()).hexdigest()
+            with patch('sys.argv', ['candidate_selection', '--targets', str(manifest), '--directory', str(root / 'inputs')]), patch('scripts.ci.apps.wechat.discovery_policy.fetch_official_page', return_value=latest), patch('scripts.ci.candidate_selection.remote_metadata', return_value={}), patch('scripts.ci.candidate_selection.download_candidate', return_value=(unknown_apk, digest, {}, {})):
                 with self.assertRaisesRegex(ValueError, 'Latest official APK is not runtime-verified'):
                     main()
-            self.assertFalse((root / 'inputs/wechat.apk').exists())
+            self.assertFalse(list((root / 'inputs').glob('wechat-*.apk')))
 
     def test_registered_mode_selects_highest_runtime_verified_profile_without_discovery(self):
         newer = copy.deepcopy(self.profile)
@@ -81,7 +84,7 @@ class CandidateSelectionTest(unittest.TestCase):
             self.assertEqual(report['selectionMode'], 'registered')
             self.assertEqual(report['identity']['versionCode'], 3190)
             self.assertEqual(report['identity']['apkSha256'], digest)
-            self.assertEqual((root / 'inputs/wechat.apk').read_bytes(), body)
+            self.assertEqual((root / f'inputs/wechat-{digest}.apk').read_bytes(), body)
             self.assertEqual(json.loads(manifest.read_text()), original_targets)
 
     def test_registered_mode_rejects_static_only_policy(self):
@@ -94,6 +97,41 @@ class CandidateSelectionTest(unittest.TestCase):
             with patch('sys.argv', ['candidate_selection', '--mode', 'registered', '--targets', str(manifest), '--directory', str(root / 'inputs')]), patch('scripts.ci.apps.wechat.discovery_policy.discover', side_effect=AssertionError('discovery must not run')):
                 with self.assertRaisesRegex(ValueError, 'No runtime-verified registered APK'):
                     main()
+
+    def test_registered_mode_requires_digest_for_multiple_latest_version_variants(self):
+        repack = copy.deepcopy(self.profile)
+        repack['identity']['apkSha256'] = 'b' * 64
+        repack['sourceUrl'] = 'https://dldir1v6.qq.com/weixin/android/repack.apk'
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = root / 'targets.json'
+            manifest.write_text(json.dumps([self.profile, repack]))
+            with patch('sys.argv', ['candidate_selection', '--mode', 'registered', '--targets', str(manifest), '--directory', str(root / 'inputs')]), patch('scripts.ci.apps.wechat.discovery_policy.discover', side_effect=AssertionError('discovery must not run')):
+                with self.assertRaisesRegex(ValueError, 'specify --apk-sha256'):
+                    main()
+
+    def test_registered_mode_uses_explicit_digest_for_latest_version_variant(self):
+        body = b'cached repack bytes'
+        digest = hashlib.sha256(body).hexdigest()
+        repack = copy.deepcopy(self.profile)
+        repack['identity']['apkSha256'] = digest
+        repack['sourceUrl'] = 'https://dldir1v6.qq.com/weixin/android/repack.apk'
+        original = copy.deepcopy(self.profile)
+        original['identity']['apkSha256'] = 'c' * 64
+        remote = {'content_length': len(body), 'last_modified': 'Wed, 07 Oct 2026 00:00:00 GMT', 'etag': ''}
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = root / 'targets.json'
+            manifest.write_text(json.dumps([original, repack]))
+            cache = root / 'inputs/cache'
+            cache.mkdir(parents=True)
+            (cache / f'{digest}.apk').write_bytes(body)
+            (cache / 'candidate.json').write_text(json.dumps(dict(remote, url=repack['sourceUrl'], sha256=digest)))
+            with patch('sys.argv', ['candidate_selection', '--mode', 'registered', '--apk-sha256', digest, '--targets', str(manifest), '--directory', str(root / 'inputs')]), patch('scripts.ci.apps.wechat.discovery_policy.discover', side_effect=AssertionError('discovery must not run')), patch('scripts.ci.candidate_selection.remote_metadata', return_value=remote):
+                main()
+            report = json.loads((root / 'inputs/candidate-report.json').read_text())
+            self.assertEqual(digest, report['identity']['apkSha256'])
+            self.assertEqual(body, (root / f'inputs/wechat-{digest}.apk').read_bytes())
 
     def test_registered_mode_rejects_download_with_wrong_digest(self):
         profile = copy.deepcopy(self.profile)
@@ -112,7 +150,7 @@ class CandidateSelectionTest(unittest.TestCase):
             with patch('sys.argv', ['candidate_selection', '--mode', 'registered', '--targets', str(manifest), '--directory', str(root / 'inputs')]), patch('scripts.ci.apps.wechat.discovery_policy.discover', side_effect=AssertionError('discovery must not run')), patch('scripts.ci.candidate_selection.remote_metadata', return_value=remote), patch('scripts.ci.fetch_latest_wechat_apk.urlopen', return_value=context):
                 with self.assertRaisesRegex(ValueError, 'APK SHA-256 mismatch'):
                     main()
-            self.assertFalse((root / 'inputs/wechat.apk').exists())
+            self.assertFalse(list((root / 'inputs').glob('wechat-*.apk')))
 
     def test_replay_cli_reuses_verified_cache_and_writes_inputs(self):
         body = b'cached official artifact'
@@ -130,5 +168,5 @@ class CandidateSelectionTest(unittest.TestCase):
             (cache / 'candidate.json').write_text(json.dumps(dict(remote, url=profile['sourceUrl'], sha256=digest)))
             with patch('sys.argv', ['candidate_selection', '--targets', str(manifest), '--directory', str(root)]), patch('scripts.ci.apps.wechat.discovery_policy.fetch_official_page', return_value=profile['sourceUrl']), patch('scripts.ci.candidate_selection.remote_metadata', return_value=remote):
                 main()
-            self.assertEqual((root / 'wechat.apk').read_bytes(), body)
+            self.assertEqual((root / f'wechat-{digest}.apk').read_bytes(), body)
             self.assertEqual(json.loads((root / 'candidate-report.json').read_text())['identity']['versionName'], '8.0.78')

@@ -8,13 +8,12 @@ from scripts.ci.discover_latest_wechat import append_github_output
 
 
 def discovery_decision(targets, source_url, apk_sha256, force_recheck):
-    matches = [target for target in targets if target.get('sourceUrl') == source_url]
-    if len(matches) > 1:
-        raise ValueError('Multiple profiles register the discovered source')
-    if matches and matches[0]['identity']['apkSha256'].lower() != apk_sha256:
-        raise ValueError('Registered source APK SHA-256 changed')
+    matches = [target for target in targets if target.get('sourceUrl') == source_url
+               and target['identity']['apkSha256'].lower() == apk_sha256.lower()]
     if force_recheck:
         return 'FORCE_RECHECK'
+    if len(matches) > 1:
+        raise ValueError('Multiple profiles register the same source APK identity')
     if matches and matches[0].get('verificationStatus') in {'runtime-verified-local', 'runtime-verified-hosted'}:
         return 'SKIP_SUPPORTED_BUILD'
     return 'ANALYZE_CANDIDATE'

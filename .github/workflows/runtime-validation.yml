@@ -18,6 +18,10 @@ on:
           - latest
           - registered
         default: latest
+      apk_sha256:
+        description: Select an exact runtime-verified profile when registered variants share the latest version
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -54,10 +58,12 @@ jobs:
             --app-id "$APP_ID" \
             --mode "$CANDIDATE_MODE" \
             --targets "$TARGETS_PATH" \
+            --apk-sha256 "${{ inputs.apk_sha256 || '' }}" \
             --directory runtime-inputs
       - name: Check real APK and build replay module
         run: |
-          ./gradlew --no-daemon :compat-checker:run --args="check --app-id $APP_ID --targets $TARGETS_PATH --apk runtime-inputs/$APP_ID.apk"
+          expected_sha256="$(jq -r .identity.apkSha256 runtime-inputs/candidate-report.json)"
+          ./gradlew --no-daemon :compat-checker:run --args="check --app-id $APP_ID --targets $TARGETS_PATH --apk runtime-inputs/$APP_ID-$expected_sha256.apk"
           ./gradlew --no-daemon :app:assembleDebug
           cp app/build/outputs/apk/debug/app-debug.apk runtime-inputs/app-debug.apk
       - uses: actions/upload-artifact@v7
@@ -69,7 +75,7 @@ jobs:
         with:
           name: ${{ steps.policy.outputs.artifact_prefix }}-${{ steps.policy.outputs.app_id }}-runtime-candidate
           path: |
-            runtime-inputs/${{ inputs.app_id || 'wechat' }}.apk
+            runtime-inputs/${{ inputs.app_id || 'wechat' }}-*.apk
             runtime-inputs/candidate-report.json
           retention-days: 7
 

@@ -41,6 +41,22 @@ class AppPolicyTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "package"):
             validate_targets([target], "wechat")
 
+    def test_target_manifest_uses_normalized_apk_digest_as_variant_identity(self):
+        target = {
+            "identity": {
+                "packageName": "com.tencent.mm", "abi": "arm64-v8a", "versionCode": 1,
+                "apkSha256": "a" * 64,
+                "signerSha256": get_policy("wechat").signer_sha256,
+            },
+            "sourceUrl": "https://dldir1v6.qq.com/weixin/android/test.apk",
+            "hooks": [{"id": "tablet"}, {"id": "login"}],
+        }
+        repack = {**target, "identity": {**target["identity"], "apkSha256": "B" * 64}}
+        validate_targets([target, repack], "wechat")
+        duplicate = {**target, "identity": {**target["identity"], "apkSha256": "A" * 64}}
+        with self.assertRaisesRegex(ValueError, "(?i)duplicate.*profile"):
+            validate_targets([target, duplicate], "wechat")
+
 
 if __name__ == "__main__":
     unittest.main()

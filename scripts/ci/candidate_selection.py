@@ -3,6 +3,7 @@ import argparse
 import copy
 import importlib
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -43,7 +44,10 @@ def main():
     parser.add_argument('--targets', type=Path)
     parser.add_argument('--directory', type=Path, required=True)
     parser.add_argument('--mode', choices=('latest', 'registered'), default='latest')
+    parser.add_argument('--apk-sha256', help='Select a registered APK variant by SHA-256')
     args = parser.parse_args()
+    if args.apk_sha256 and not re.fullmatch(r'[a-fA-F0-9]{64}', args.apk_sha256):
+        raise ValueError('--apk-sha256 must contain 64 hexadecimal characters')
     policy = get_policy(args.app_id)
     targets_path = args.targets or Path(policy.targets_path)
     targets = json.loads(targets_path.read_text())
@@ -56,8 +60,11 @@ def main():
             raise ValueError('No runtime-verified registered APK is available for this application policy')
         highest_version_code = max(row['identity']['versionCode'] for row in matches)
         matches = [row for row in matches if row['identity']['versionCode'] == highest_version_code]
+        if args.apk_sha256:
+            matches = [row for row in matches
+                       if row['identity']['apkSha256'].lower() == args.apk_sha256.lower()]
         if len(matches) != 1:
-            raise ValueError('Highest runtime-verified registered APK is ambiguous across policy profiles')
+            raise ValueError('Highest runtime-verified APK selection is ambiguous; specify --apk-sha256')
         selected = matches[0]
         url = selected['sourceUrl']
         expected_sha256 = selected['identity']['apkSha256'].lower()
@@ -67,16 +74,20 @@ def main():
         url = candidate.url
         validate_official_apk_url(url, policy.official_apk_prefix)
         matches = [row for row in targets if row['sourceUrl'] == url]
-        if len(matches) != 1 or matches[0]['verificationStatus'] not in SUPPORTED_STATUSES:
-            raise ValueError('Latest official APK is not runtime-verified; run compatibility adaptation first')
-        selected = matches[0]
-        expected_sha256 = selected['identity']['apkSha256'].lower()
+        digests = {row['identity']['apkSha256'].lower() for row in matches}
+        expected_sha256 = next(iter(digests)) if len(digests) == 1 else ''
     validate_official_apk_url(url, policy.official_apk_prefix)
     args.directory.mkdir(parents=True, exist_ok=True)
     apk, digest, _, _ = download_candidate(url, args.directory / 'cache', expected_sha256,
                                            remote_metadata(url, policy), policy)
+    if args.mode == 'latest':
+        matches = [row for row in targets if row['sourceUrl'] == url
+                   and row['identity']['apkSha256'].lower() == digest.lower()]
+        if len(matches) != 1 or matches[0]['verificationStatus'] not in SUPPORTED_STATUSES:
+            raise ValueError('Latest official APK is not runtime-verified; run compatibility adaptation first')
+        selected = matches[0]
     report = replay_report(targets, url, digest, policy.app_id, args.mode)
-    shutil.copy2(apk, args.directory / f'{policy.app_id}.apk')
+    shutil.copy2(apk, args.directory / f'{policy.app_id}-{digest}.apk')
     (args.directory / 'candidate-report.json').write_text(json.dumps(report, indent=2) + '\n')
 
 

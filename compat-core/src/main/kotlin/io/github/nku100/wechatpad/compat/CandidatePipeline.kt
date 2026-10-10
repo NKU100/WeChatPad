@@ -403,8 +403,8 @@ object CandidateCompatibilityAnalyzer {
         if (!baseline.verificationStatus.runtimeVerified) {
             return "Baseline profile has not completed runtime verification"
         }
-        if (baseline.identity.versionCode >= candidate.versionCode) {
-            return "Baseline version must be older than the candidate"
+        if (baseline.identity.versionCode > candidate.versionCode) {
+            return "Baseline version cannot be newer than the candidate"
         }
         if (baseline.identity.versionName !in checkedVersions) {
             return "Adaptation baseline is not included in the static regression window"
@@ -428,7 +428,6 @@ object CandidateCompatibilityAnalyzer {
 
     private fun matchesExactStaticIdentity(candidate: BuildIdentity, registered: BuildIdentity): Boolean =
         candidate.packageName == registered.packageName &&
-            candidate.versionName == registered.versionName &&
             candidate.versionCode == registered.versionCode &&
             candidate.abi == registered.abi &&
             candidate.apkSha256 != null && registered.apkSha256 != null &&

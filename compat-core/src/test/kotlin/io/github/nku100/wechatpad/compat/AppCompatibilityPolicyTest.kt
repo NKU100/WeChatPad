@@ -45,6 +45,30 @@ class AppCompatibilityPolicyTest {
         assertNotNull(targets.singleOrNull { it.identity.versionName == "8.0.79" })
     }
 
+    @Test
+    fun permitsDistinctDigestsAtTheSameVersionAndRejectsCaseInsensitiveDuplicates() {
+        val policy = AppCompatibilityPolicies.require("wechat")
+        val first = productionTarget("a".repeat(64))
+        val repack = productionTarget("b".repeat(64))
+        policy.validateTargets(listOf(first, repack))
+
+        val duplicate = productionTarget("A".repeat(64))
+        assertFailsWith<IllegalArgumentException> {
+            policy.validateTargets(listOf(first, duplicate))
+        }
+    }
+
+    private fun productionTarget(digest: String) = CompatibilityTarget(
+        identity = BuildIdentity("com.tencent.mm", "8.0.79", 3200, "arm64-v8a", digest,
+            "0fe4ff85c215918396dadc7cd8ce6963339af33d37751a56e54c7206b63a3c7c"),
+        featureRulesVersion = 1,
+        hooks = listOf(
+            HookRule("tablet", "tablet", emptyList(), "Z", "Lfixture/Tablet;->check()Z"),
+            HookRule("login", "login", emptyList(), "V", "Lfixture/Login;->open()V"),
+        ),
+        sourceUrl = "https://dldir1v6.qq.com/weixin/android/repack.apk",
+    )
+
     private fun target() = CompatibilityTarget(
         identity = BuildIdentity(
             packageName = "org.example.testapp",

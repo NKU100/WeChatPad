@@ -24,11 +24,11 @@ def candidate_key(report):
     policy = policy_for_report(report)
     identity = report["identity"]
     code, digest = identity["versionCode"], identity["apkSha256"]
-    if type(code) is not int or code <= 0 or not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest):
+    if type(code) is not int or code <= 0 or not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest, re.IGNORECASE):
         raise ValueError("Candidate version code or SHA-256 is invalid")
     if identity.get("abi") not in policy.supported_abis:
         raise ValueError("Candidate ABI is not registered for this app")
-    return f"{policy.app_id}-{identity['packageName']}-{identity['abi']}-{code}-{digest}"
+    return f"{policy.app_id}-{identity['packageName']}-{identity['abi']}-{code}-{digest.lower()}"
 
 
 def eligible_candidate(report, targets, app_id=None):
@@ -49,24 +49,38 @@ def eligible_candidate(report, targets, app_id=None):
         raise ValueError("Candidate identity does not match the trusted baseline")
     if any(p["identity"]["versionCode"] == identity["versionCode"]
            and p["identity"].get("packageName") == identity["packageName"]
-           and p["identity"].get("abi") == identity["abi"] for p in targets):
+           and p["identity"].get("abi") == identity["abi"]
+           and p["identity"].get("apkSha256", "").lower() == identity["apkSha256"].lower()
+           for p in targets):
         return False
-    if identity["versionCode"] <= baseline["versionCode"]:
-        raise ValueError("Candidate must be newer than the supported baseline")
+    if identity["versionCode"] < baseline["versionCode"]:
+        raise ValueError("Candidate must not be older than the supported baseline")
     return True
 
 
 def validate_profiles(before, after, report, app_id=None):
     policy = policy_for_report(report, app_id)
+    candidate_key(report)
+    validate_targets(after, policy.app_id)
+
+    def profile_key(profile):
+        identity = profile["identity"]
+        return (identity["packageName"], identity["abi"], identity["versionCode"], identity["apkSha256"].lower())
+
+    original = {profile_key(p): p for p in before}
+    updated = {profile_key(p): p for p in after}
+    if len(updated) != len(after):
+        raise ValueError("Adaptation contains a duplicate profile identity")
     if len(after) != len(before) + 1:
         raise ValueError("Adaptation must add exactly one profile and retain existing profiles")
-    original = { (p["identity"]["packageName"], p["identity"]["abi"], p["identity"]["versionCode"]): p for p in before}
-    updated = { (p["identity"]["packageName"], p["identity"]["abi"], p["identity"]["versionCode"]): p for p in after}
     if len(updated) != len(after) or any(updated.get(code) != profile for code, profile in original.items()):
         raise ValueError("Adaptation modified or removed an existing profile")
     identity = report["identity"]
-    candidate = updated.get((identity["packageName"], identity["abi"], identity["versionCode"]))
-    if candidate is None or candidate["identity"] != report["identity"]:
+    candidate_key_value = (
+        identity["packageName"], identity["abi"], identity["versionCode"], identity["apkSha256"].lower(),
+    )
+    candidate = updated.get(candidate_key_value)
+    if candidate is None or profile_key(candidate) != candidate_key_value or candidate["identity"] != identity:
         raise ValueError("Candidate profile identity must match the verified APK")
     if candidate.get("verificationStatus") != "static-verified":
         raise ValueError("Candidate must remain static-verified until runtime verification")
@@ -142,16 +156,19 @@ def prepare(repository, report_path, candidate_apk, directory):
     apk_dir = worktree / "work/apks"
     apk_dir.mkdir(parents=True)
     # Hard links avoid duplicating large, already verified APK files on the runner.
-    os.link(candidate_apk, apk_dir / "candidate.apk")
+    candidate_digest = report["identity"]["apkSha256"].lower()
+    candidate_filename = f"candidate-{candidate_digest}.apk"
+    os.link(candidate_apk, apk_dir / candidate_filename)
     regression = select_regression_targets(before, report["identity"]["versionCode"], policy.app_id,
                                           report["identity"]["packageName"], report["identity"]["abi"])
-    apks = [(report["identity"]["versionName"], "work/apks/candidate.apk")]
+    apks = [(report["identity"]["versionName"], f"work/apks/{candidate_filename}", candidate_digest)]
     for target in regression:
         identity = target["identity"]
         cached = ensure_apk(target, repository / ".cache" / f"{policy.app_id}-apks")
-        destination = apk_dir / f"{identity['versionCode']}.apk"
+        digest = identity["apkSha256"].lower()
+        destination = apk_dir / f"{identity['versionCode']}-{digest}.apk"
         os.link(cached, destination)
-        apks.append((identity["versionName"], str(destination.relative_to(worktree))))
+        apks.append((identity["versionName"], str(destination.relative_to(worktree)), digest))
     analysis = worktree / "work/analysis"
     analysis.mkdir(parents=True)
     (analysis / "candidate-report.json").write_text(json.dumps(report, indent=2))
@@ -184,10 +201,9 @@ def validate(directory):
     after = json.loads((worktree / policy.targets_path).read_text())
     validate_profiles(state["before"], after, state["report"], policy.app_id)
     candidate = state["report"]
-    for version, apk in state["apks"]:
-        expected = next(p for p in after if p["identity"]["versionName"] == version)["identity"]["apkSha256"]
+    for version, apk, expected in state["apks"]:
         check_apk(worktree, Path(policy.targets_path), worktree / apk, expected,
-                  directory / f"check-{version}.log", offline=True)
+                  directory / f"check-{version}-{expected}.log", offline=True)
     run_bounded(["./gradlew", "--offline", "--no-daemon", ":app:testDebugUnitTest", ":compat-core:test", ":compat-checker:test", ":app:assembleDebug"],
                 worktree, dict(os.environ), directory / "build.log", timeout=600)
     for path in new_files:
@@ -196,7 +212,7 @@ def validate(directory):
     with (directory / "adaptation.patch").open("w") as patch:
         subprocess.run(["git", "diff", "--binary", state.get("agent_base", state["base"])], cwd=worktree, stdout=patch, check=True)
     report = dict(candidate, status="STATIC_VERIFIED_PENDING_RUNTIME", blockers=[],
-                  checkedVersions=[version for version, _ in state["apks"]],
+                  checkedVersions=list(dict.fromkeys(version for version, _, _ in state["apks"])),
                   suggestedProfile=next(p for p in after if p["identity"] == candidate["identity"]))
     # Findings describe the successful exact-profile checks, not the pre-adaptation failure.
     report["hooks"] = [{"hookId": h["id"], "status": "UNIQUE_MATCH", "stringAnchor": h["stringAnchor"],

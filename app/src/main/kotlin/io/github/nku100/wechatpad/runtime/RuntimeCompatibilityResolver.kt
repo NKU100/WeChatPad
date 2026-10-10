@@ -37,33 +37,6 @@ class RuntimeCompatibilityResolver(
     }
 
     fun resolve(build: InstalledBuild): RuntimeResolution {
-        val cached = try {
-            cache.read(build.installFingerprint)
-        } catch (_: Exception) {
-            null
-        }
-        val cachedTarget = cached?.let { entry ->
-            targets.singleOrNull { it.cacheKey() == entry.key }
-        }
-        if (cached != null && cachedTarget != null) {
-            val identity = cachedTarget.identity.forInstalledBuild(build)
-            if (!identity.matchesTargetIdentity(cachedTarget)) {
-                val result = CompatibilityResolver.resolve(
-                    identity = identity,
-                    verification = IdentityVerification.INSTALLED_PACKAGE,
-                    targets = targets,
-                    facts = emptyList(),
-                    requiredHookIds = policy.requiredHookIds,
-                )
-                return RuntimeResolution(cachedTarget, result, cacheHit = false)
-            }
-
-            val expectedDescriptors = cachedTarget.hooks.associate { it.id to it.expectedDescriptor }
-            if (cached.result.resolvedDescriptors == expectedDescriptors) {
-                return RuntimeResolution(cachedTarget, cached.result, cacheHit = true)
-            }
-        }
-
         val apkSha256 = hashApk(build.apkFiles.first())
         val target = targets.singleOrNull {
             it.identity.packageName == build.identity.packageName && it.identity.abi == build.identity.abi &&
@@ -77,17 +50,19 @@ class RuntimeCompatibilityResolver(
             cacheHit = false,
         )
 
-        val identity = target.identity.forInstalledBuild(build, apkSha256)
-        if (!identity.matchesTargetIdentity(target)) {
-            val result = CompatibilityResolver.resolve(
-                identity = identity,
-                verification = IdentityVerification.INSTALLED_PACKAGE,
-                targets = targets,
-                facts = emptyList(),
-                requiredHookIds = policy.requiredHookIds,
-            )
-            return RuntimeResolution(target, result, cacheHit = false)
+        val cached = try {
+            cache.read(build.installFingerprint)
+        } catch (_: Exception) {
+            null
         }
+        if (cached?.key == target.cacheKey()) {
+            val expectedDescriptors = target.hooks.associate { it.id to it.expectedDescriptor }
+            if (cached.result.resolvedDescriptors == expectedDescriptors) {
+                return RuntimeResolution(target, cached.result, cacheHit = true)
+            }
+        }
+
+        val identity = target.identity.forInstalledBuild(build, apkSha256)
 
         val facts = readFacts(build.apkFiles, target.hooks.mapTo(linkedSetOf()) { it.stringAnchor })
         val result = CompatibilityResolver.resolve(
@@ -124,6 +99,4 @@ class RuntimeCompatibilityResolver(
         apkSha256 = apkSha256,
     )
 
-    private fun BuildIdentity.matchesTargetIdentity(target: CompatibilityTarget): Boolean =
-        packageName == target.identity.packageName && abi == target.identity.abi
 }

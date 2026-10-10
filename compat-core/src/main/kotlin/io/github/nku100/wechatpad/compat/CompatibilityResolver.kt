@@ -9,43 +9,43 @@ object CompatibilityResolver {
         requiredHookIds: Set<String>,
     ): CompatibilityResult {
         val sameBuild = targets.filter {
-            it.identity.versionName == identity.versionName && it.identity.versionCode == identity.versionCode
+            it.identity.versionCode == identity.versionCode
         }
         val matchingBuild = sameBuild.filter {
             it.identity.packageName == identity.packageName && it.identity.abi == identity.abi
         }
-        if (matchingBuild.size > 1) {
-            return rejected(CompatibilityStatus.INVALID_PROFILE, "Multiple profiles register this app build")
-        }
-        val target = matchingBuild.singleOrNull()
-            ?: return if (sameBuild.isEmpty()) {
+        if (matchingBuild.isEmpty()) {
+            return if (sameBuild.isEmpty()) {
                 rejected(CompatibilityStatus.UNKNOWN_BUILD, "No target registered for this app build")
             } else {
                 rejected(CompatibilityStatus.IDENTITY_MISMATCH, "Package or ABI does not match the target")
             }
+        }
+
+        val expectedTargets = when (verification) {
+            IdentityVerification.STATIC_APK -> matchingBuild.filter { target ->
+                identity.apkSha256 != null && target.identity.apkSha256.equals(identity.apkSha256, ignoreCase = true)
+            }
+
+            IdentityVerification.INSTALLED_PACKAGE -> if (identity.apkSha256 == null) {
+                matchingBuild
+            } else {
+                matchingBuild.filter { target ->
+                    target.identity.apkSha256.equals(identity.apkSha256, ignoreCase = true)
+                }
+            }
+        }
+        if (expectedTargets.isEmpty()) {
+            return rejected(CompatibilityStatus.IDENTITY_MISMATCH, "APK SHA-256 does not match a target profile")
+        }
+        if (expectedTargets.size > 1) {
+            return rejected(CompatibilityStatus.IDENTITY_MISMATCH, "APK SHA-256 is required to distinguish registered variants")
+        }
+        val target = expectedTargets.single()
 
         val expectedIdentity = target.identity
         if (!matchesTrustedIdentity(identity, expectedIdentity)) {
             return rejected(CompatibilityStatus.IDENTITY_MISMATCH, "Package, ABI, or signer does not match the target")
-        }
-
-        val expectedApkSha256 = expectedIdentity.apkSha256
-        when (verification) {
-            IdentityVerification.STATIC_APK -> {
-                if (identity.apkSha256 == null || expectedApkSha256 == null ||
-                    !identity.apkSha256.equals(expectedApkSha256, ignoreCase = true)
-                ) {
-                    return rejected(CompatibilityStatus.IDENTITY_MISMATCH, "APK SHA-256 does not match the target")
-                }
-            }
-
-            IdentityVerification.INSTALLED_PACKAGE -> {
-                if (identity.apkSha256 != null &&
-                    (expectedApkSha256 == null || !identity.apkSha256.equals(expectedApkSha256, ignoreCase = true))
-                ) {
-                    return rejected(CompatibilityStatus.IDENTITY_MISMATCH, "APK SHA-256 does not match the target")
-                }
-            }
         }
 
         val hookIds = target.hooks.map(HookRule::id)
@@ -92,10 +92,10 @@ object CompatibilityResolver {
         requiredHookIds: Set<String>,
     ): CompatibilityResult {
         val matchingTargets = targets.filter {
-            it.identity.versionName == identity.versionName &&
-                it.identity.versionCode == identity.versionCode &&
+            it.identity.versionCode == identity.versionCode &&
                 it.identity.packageName == identity.packageName &&
-                it.identity.abi == identity.abi
+                it.identity.abi == identity.abi && identity.apkSha256 != null &&
+                it.identity.apkSha256.equals(identity.apkSha256, ignoreCase = true)
         }
         if (matchingTargets.size > 1) {
             return rejected(CompatibilityStatus.INVALID_PROFILE, "Multiple profiles register this app build")
@@ -105,24 +105,21 @@ object CompatibilityResolver {
         }
 
         val appTargets = targets.filter {
-            it.identity.packageName == identity.packageName && it.identity.abi == identity.abi &&
-                it.identity.signerSha256.equals(identity.signerSha256, ignoreCase = true)
+            it.identity.packageName == identity.packageName && it.identity.abi == identity.abi
         }
-        val latestVersionCode = appTargets.maxOfOrNull { it.identity.versionCode }
-            ?: return rejected(CompatibilityStatus.IDENTITY_MISMATCH, "No compatibility target matches this app package and ABI")
-        val latestTargets = appTargets.filter { it.identity.versionCode == latestVersionCode }
-        val trustedIdentity = latestTargets.singleOrNull()?.identity
-            ?: return rejected(CompatibilityStatus.INVALID_PROFILE, "Newest compatibility target is ambiguous")
-        if (!matchesTrustedIdentity(identity, trustedIdentity)) {
+        if (appTargets.isEmpty()) {
+            return rejected(CompatibilityStatus.IDENTITY_MISMATCH, "No compatibility target matches this app package and ABI")
+        }
+        if (appTargets.none { it.identity.signerSha256.equals(identity.signerSha256, ignoreCase = true) }) {
             return rejected(
                 CompatibilityStatus.IDENTITY_MISMATCH,
-                "Package, ABI, or signer does not match the newest registered app build",
+                "Package, ABI, or signer does not match the registered app policy",
             )
         }
 
         return rejected(
             CompatibilityStatus.UNKNOWN_BUILD,
-            "No target is registered for this version; package, ABI, and signer match the newest registered build",
+            "No target is registered for this APK SHA-256; package, ABI, and signer match the registered app policy",
         )
     }
 

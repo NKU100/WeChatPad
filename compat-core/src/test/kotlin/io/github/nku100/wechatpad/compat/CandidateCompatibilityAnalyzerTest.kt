@@ -14,6 +14,20 @@ class CandidateCompatibilityAnalyzerTest {
     }
 
     @Test
+    fun analyzesSameVersionRepackAgainstItsRuntimeVerifiedRegisteredVariant() {
+        val baseline = forwardSafeSameShapeBaseline()
+        val report = analyze(
+            identity = CANDIDATE_IDENTITY.copy(versionName = baseline.identity.versionName,
+                versionCode = baseline.identity.versionCode, apkSha256 = "b".repeat(64)),
+            baseline = baseline,
+            checkedVersions = listOf("8.0.69", "8.0.78"),
+        )
+
+        assertEquals(CandidatePipelineStatus.STATIC_VERIFIED_PENDING_RUNTIME, report.status)
+        assertEquals("8.0.78", report.baselineVersion)
+    }
+
+    @Test
     fun generatesAStaticProfileWhenEveryForwardSafeHookMatchesUniquely() {
         val report = analyze(baseline = forwardSafeSameShapeBaseline())
 

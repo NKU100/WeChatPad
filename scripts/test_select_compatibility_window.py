@@ -45,10 +45,18 @@ class SelectCompatibilityWindowTest(unittest.TestCase):
         self.assertEqual(["8.0.69"], version_names(selected))
 
     def test_rejects_duplicate_version_codes_in_the_manifest(self):
-        targets = [target("8.0.78", 3180), target("8.0.78-alt", 3180)]
+        targets = [target("8.0.78", 3180, digest="a" * 64), target("8.0.78-alt", 3180, digest="b" * 64)]
+        self.assertEqual(targets, select_regression_targets(targets, candidate_version_code=3200))
 
-        with self.assertRaisesRegex(ValueError, "duplicate version code"):
-            select_regression_targets(targets, candidate_version_code=3200)
+    def test_window_keeps_all_variants_from_three_most_recent_version_codes(self):
+        targets = [target("8.0.69", 3040), target("8.0.78", 3180),
+                   target("8.0.79", 3200, digest="a" * 64), target("8.0.79-repack", 3200, digest="b" * 64)]
+        selected = select_regression_targets(targets, candidate_version_code=3200)
+        self.assertEqual(["8.0.69", "8.0.78", "8.0.79", "8.0.79-repack"], version_names(selected))
+
+    def test_unknown_same_version_candidate_includes_registered_variant(self):
+        targets = [target("8.0.78", 3180), target("8.0.79", 3200)]
+        self.assertEqual(targets, select_regression_targets(targets, candidate_version_code=3200))
 
     def test_matrix_contains_only_the_selected_profiles_and_their_integrity_fields(self):
         selected = select_regression_targets([
@@ -80,13 +88,14 @@ class SelectCompatibilityWindowTest(unittest.TestCase):
         self.assertEqual(["8.0.78", "8.0.79"], version_names(selected))
 
 
-def target(version_name, version_code, verification_status="runtime-verified-local", package="com.tencent.mm", abi="arm64-v8a"):
+def target(version_name, version_code, verification_status="runtime-verified-local", package="com.tencent.mm", abi="arm64-v8a", digest=None):
     return {
         "identity": {
             "packageName": package,
             "versionName": version_name,
             "versionCode": version_code,
             "abi": abi,
+            "apkSha256": digest or f"{version_code:064x}",
         },
         "verificationStatus": verification_status,
     }

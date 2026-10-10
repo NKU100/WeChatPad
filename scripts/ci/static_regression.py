@@ -25,7 +25,10 @@ def registered_window(profiles, app_id='wechat'):
     supported = [p for p in profiles if p.get('verificationStatus') in SUPPORTED
                  and p.get('identity', {}).get('packageName') == policy.package_name
                  and p.get('identity', {}).get('abi') == abi]
-    selected = sorted(supported, key=lambda p: (p['identity']['versionCode'], p['identity']['apkSha256']), reverse=True)[:3]
+    recent_codes = sorted({p['identity']['versionCode'] for p in supported})[-3:]
+    selected_codes = set(recent_codes)
+    selected = [p for p in supported if p['identity']['versionCode'] in selected_codes]
+    selected.sort(key=lambda p: p['identity']['versionCode'], reverse=True)
     if not selected:
         raise ValueError('Static regression requires at least one runtime-verified profile')
     return selected

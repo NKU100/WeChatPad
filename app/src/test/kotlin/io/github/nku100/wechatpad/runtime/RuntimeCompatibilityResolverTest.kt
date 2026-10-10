@@ -42,7 +42,33 @@ class RuntimeCompatibilityResolverTest {
         assertFalse(first.cacheHit)
         assertEquals(CompatibilityStatus.COMPATIBLE, second.result.status)
         assertTrue(second.cacheHit)
-        assertEquals(1, hashCalls)
+        assertEquals(2, hashCalls)
+        assertEquals(1, scanCalls)
+    }
+
+    @Test
+    fun rehashesBeforeUsingCachedCompatibilityForAnUnchangedInstallFingerprint() = withFixture { directory, apk ->
+        var currentHash = APK_SHA256
+        var scanCalls = 0
+        val resolver = RuntimeCompatibilityResolver(
+            targets = listOf(target()),
+            policy = WeChatCompatibilityPolicy.policy,
+            cache = RuntimeResolutionCache(directory.resolve("cache").toFile()),
+            hashApk = { currentHash },
+            readFacts = { _, _ ->
+                scanCalls++
+                facts()
+            },
+        )
+        val build = installedBuild(directory, apk)
+
+        assertEquals(CompatibilityStatus.COMPATIBLE, resolver.resolve(build).result.status)
+        currentHash = UNKNOWN_SHA256
+        val replaced = resolver.resolve(build)
+
+        assertEquals(CompatibilityStatus.UNKNOWN_BUILD, replaced.result.status)
+        assertEquals(null, replaced.target)
+        assertFalse(replaced.cacheHit)
         assertEquals(1, scanCalls)
     }
 

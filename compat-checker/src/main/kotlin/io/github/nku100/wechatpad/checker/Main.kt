@@ -74,7 +74,8 @@ private fun analyzeCandidate(arguments: CandidateArguments) {
     val checkedVersions = arguments.checkedVersions
     val matchingTargets = targets.filter {
         it.identity.packageName == identity.packageName && it.identity.abi == identity.abi &&
-            it.identity.versionName == identity.versionName && it.identity.versionCode == identity.versionCode
+            it.identity.versionCode == identity.versionCode && identity.apkSha256 != null &&
+            it.identity.apkSha256.equals(identity.apkSha256, ignoreCase = true)
     }
     require(matchingTargets.size <= 1) { "Multiple profiles register this app version" }
 
@@ -91,15 +92,7 @@ private fun analyzeCandidate(arguments: CandidateArguments) {
             sourceUrl = arguments.sourceUrl,
         )
     } ?: run {
-        val baseline = targets
-            .filter {
-                it.verificationStatus.runtimeVerified &&
-                    it.identity.packageName == identity.packageName &&
-                    it.identity.abi == identity.abi &&
-                    it.identity.signerSha256.equals(identity.signerSha256, ignoreCase = true) &&
-                    it.identity.versionCode < identity.versionCode
-            }
-            .maxByOrNull { it.identity.versionCode }
+        val baseline = selectCandidateBaseline(targets, identity, arguments.baselineApkSha256)
 
         if (baseline == null) {
             baselineMissingReport(identity, checkedVersions, arguments.sourceUrl, arguments.appId)
@@ -126,6 +119,39 @@ private fun analyzeCandidate(arguments: CandidateArguments) {
         println("Hook ${hook.hookId}: ${hook.status} ($detail)")
     }
     report.blockers.forEach { blocker -> println("Blocked: $blocker") }
+}
+
+internal fun selectCandidateBaseline(
+    targets: List<CompatibilityTarget>,
+    candidate: io.github.nku100.wechatpad.compat.BuildIdentity,
+    baselineApkSha256: String? = null,
+): CompatibilityTarget? {
+    val eligible = targets.filter {
+        it.verificationStatus.runtimeVerified &&
+            it.identity.packageName == candidate.packageName &&
+            it.identity.abi == candidate.abi &&
+            it.identity.signerSha256.equals(candidate.signerSha256, ignoreCase = true) &&
+            it.identity.versionCode <= candidate.versionCode
+    }
+    val sameVersion = eligible.filter { it.identity.versionCode == candidate.versionCode }
+    val pool = if (sameVersion.isNotEmpty()) {
+        sameVersion
+    } else {
+        val latestVersion = eligible.maxOfOrNull { it.identity.versionCode } ?: return null
+        eligible.filter { it.identity.versionCode == latestVersion }
+    }
+    val selected = if (baselineApkSha256 == null) {
+        require(pool.size == 1) { "Baseline profile is ambiguous; specify --baseline-apk-sha256" }
+        pool.single()
+    } else {
+        require(baselineApkSha256.matches(Regex("[a-fA-F0-9]{64}"))) {
+            "Baseline APK SHA-256 is invalid"
+        }
+        pool.singleOrNull {
+            it.identity.apkSha256.equals(baselineApkSha256, ignoreCase = true)
+        } ?: throw IllegalArgumentException("Baseline APK SHA-256 does not select an eligible profile")
+    }
+    return selected
 }
 
 private fun baselineMissingReport(
@@ -181,7 +207,7 @@ private fun parseCandidateArguments(args: Array<String>): CandidateArguments {
         "--regression-passed",
         "--report",
     )
-    val allowedKeys = requiredKeys + setOf("--profile-merged-to-main", "--app-id")
+    val allowedKeys = requiredKeys + setOf("--profile-merged-to-main", "--app-id", "--baseline-apk-sha256")
     require(args.firstOrNull() == "analyze-candidate") {
         "Usage: analyze-candidate --targets <targets.json> --apk <apk-path> --source-url <url> " +
             "--checked-versions <comma-separated-versions> --regression-passed <true|false> --report <report.json>"
@@ -207,6 +233,7 @@ private fun parseCandidateArguments(args: Array<String>): CandidateArguments {
         checkedVersions = values.getValue("--checked-versions").split(',').map(String::trim).filter(String::isNotEmpty),
         regressionPassed = regressionPassed,
         profileMergedToMain = profileMergedToMain,
+        baselineApkSha256 = values["--baseline-apk-sha256"]?.takeIf(String::isNotBlank),
         report = File(values.getValue("--report")),
         appId = values["--app-id"] ?: "wechat",
     )
@@ -221,6 +248,7 @@ private data class CandidateArguments(
     val checkedVersions: List<String>,
     val regressionPassed: Boolean,
     val profileMergedToMain: Boolean,
+    val baselineApkSha256: String?,
     val report: File,
     val appId: String,
 )

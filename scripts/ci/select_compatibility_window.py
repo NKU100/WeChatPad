@@ -26,7 +26,7 @@ def select_regression_targets(
         if len(compatible_abis) != 1:
             raise ValueError("Compatibility window requires one explicit package and ABI")
         abi = compatible_abis.pop()
-    seen_version_codes: set[int] = set()
+    seen_profile_keys: set[tuple[str, str, int, str]] = set()
     supported: list[tuple[int, dict]] = []
     for target in targets:
         identity = target.get("identity")
@@ -38,22 +38,25 @@ def select_regression_targets(
         target_identity = identity
         if target_identity.get("packageName") != package_name or target_identity.get("abi") != abi:
             continue
-        if version_code in seen_version_codes:
-            raise ValueError(f"duplicate version code in compatibility targets: {version_code}")
-        seen_version_codes.add(version_code)
         if target.get("verificationStatus") in SUPPORTED_STATUSES:
+            raw_digest = identity.get("apkSha256")
+            if not isinstance(raw_digest, str) or not re.fullmatch(r"[a-fA-F0-9]{64}", raw_digest):
+                raise ValueError("selected target has an invalid APK SHA-256")
+            key = (package_name, abi, version_code, raw_digest.lower())
+            if key in seen_profile_keys:
+                raise ValueError("duplicate compatibility profile identity")
+            seen_profile_keys.add(key)
             supported.append((version_code, target))
 
     supported.sort(key=lambda item: item[0])
     if supported and candidate_version_code < supported[-1][0]:
         raise ValueError("candidate version code is below the latest formally supported build")
 
-    candidate_is_supported = any(code == candidate_version_code for code, _ in supported)
-    if candidate_is_supported:
-        return [target for _, target in supported[-3:]]
-
-    predecessors = [target for code, target in supported if code < candidate_version_code]
-    return predecessors[-2:]
+    eligible = [(code, target) for code, target in supported if code <= candidate_version_code]
+    capacity = 3 if any(code == candidate_version_code for code, _ in supported) else 2
+    recent_codes = sorted({code for code, _ in eligible})[-capacity:]
+    selected_codes = set(recent_codes)
+    return [target for code, target in eligible if code in selected_codes]
 
 
 def matrix_entries(targets: list[dict], app_id: Optional[str] = None) -> list[dict[str, object]]:

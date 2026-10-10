@@ -185,8 +185,9 @@ def run_goal(client, directory, prompt, token_budget):
         raise ValueError('Goal token budget must be a positive integer')
     workspace = directory / 'checkout'
     hidden_repository = str(Path(os.environ.get('GITHUB_WORKSPACE', '/unavailable-repository')) / '.git/HEAD')
-    probe = ("from pathlib import Path; import tempfile; "
-             "assert Path('work/apks/candidate.apk').is_file(); "
+    probe = ("from pathlib import Path; import json, tempfile; "
+             "report=json.loads(Path('work/analysis/candidate-report.json').read_text()); "
+             "assert Path('work/apks').joinpath('candidate-' + report['identity']['apkSha256'] + '.apk').is_file(); "
              "assert Path('work/analysis/candidate-report.json').is_file(); "
              "assert not Path('../state.json').exists(); "
              f"assert not Path({hidden_repository!r}).exists(); "

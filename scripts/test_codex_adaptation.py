@@ -78,7 +78,7 @@ class CodexAdaptationTest(unittest.TestCase):
         baseline_code = max(p['identity']['versionCode'] for p in self.targets)
         self.report['identity'].update(versionName='0.0.1', versionCode=baseline_code - 1)
         self.report['manualSelection'] = True
-        with self.assertRaisesRegex(ValueError, 'newer'):
+        with self.assertRaisesRegex(ValueError, 'older'):
             eligible_candidate(self.report, self.targets)
 
     def test_hosted_verified_profile_is_a_trusted_baseline(self):
@@ -88,6 +88,17 @@ class CodexAdaptationTest(unittest.TestCase):
     def test_known_version_or_rejected_identity_does_not_consume_model_usage(self):
         self.report['identity'] = self.targets[-1]['identity']
         self.assertFalse(eligible_candidate(self.report, self.targets))
+
+    def test_same_version_new_digest_is_eligible_but_exact_registered_digest_is_not(self):
+        same_version = copy.deepcopy(self.targets[-1])
+        same_version["identity"].update(versionName="8.0.79", versionCode=3200)
+        same_version["identity"]["apkSha256"] = "b" * 64
+        same_version["verificationStatus"] = "runtime-verified-hosted"
+        targets = self.targets + [same_version]
+        self.report["identity"].update(versionName="8.0.79", versionCode=3200, apkSha256="f" * 64)
+        self.assertTrue(eligible_candidate(self.report, targets))
+        self.report["identity"]["apkSha256"] = same_version["identity"]["apkSha256"]
+        self.assertFalse(eligible_candidate(self.report, targets))
         self.report['identity'] = self.identity
         self.report['status'] = 'IDENTITY_REJECTED'
         self.assertFalse(eligible_candidate(self.report, self.targets))
@@ -111,6 +122,15 @@ class CodexAdaptationTest(unittest.TestCase):
         self.profile['verificationStatus'] = 'runtime-verified-local'
         with self.assertRaisesRegex(ValueError, 'static-verified'):
             validate_profiles(self.targets, self.targets + [self.profile], self.report)
+
+    def test_profile_validation_retains_every_variant_and_rejects_duplicate_full_key(self):
+        old_variant = copy.deepcopy(self.targets[-1])
+        old_variant["identity"]["apkSha256"] = "b" * 64
+        before = self.targets + [old_variant]
+        validate_profiles(before, before + [self.profile], self.report)
+        duplicate = copy.deepcopy(self.profile)
+        with self.assertRaisesRegex(ValueError, "(?i)duplicate.*profile"):
+            validate_profiles(before, before + [self.profile, duplicate], self.report)
 
     def test_agent_cannot_register_wrong_identity_or_change_validators(self):
         self.profile['identity'] = dict(self.identity, apkSha256='c' * 64)

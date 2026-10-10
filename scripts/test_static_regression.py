@@ -18,6 +18,17 @@ class StaticRegressionTest(unittest.TestCase):
                                       (5, 'runtime-verified-hosted')]]
         self.assertEqual([5, 3, 2], [p['identity']['versionCode'] for p in registered_window(profiles)])
 
+    def test_window_keeps_all_supported_variants_from_three_recent_version_codes(self):
+        profiles = [{'identity': {'packageName': 'com.tencent.mm', 'abi': 'arm64-v8a', 'versionCode': code,
+                                  'versionName': name, 'apkSha256': digest,
+                                  'signerSha256': '0fe4ff85c215918396dadc7cd8ce6963339af33d37751a56e54c7206b63a3c7c'},
+                     'sourceUrl': f'https://dldir1v6.qq.com/weixin/android/{name}.apk',
+                     'hooks': [{'id': 'tablet'}, {'id': 'login'}],
+                     'verificationStatus': 'runtime-verified-local'}
+                    for code, name, digest in [(3, 'old', '3' * 64), (4, 'recent', '4' * 64),
+                                               (5, 'latest', '5' * 64), (5, 'latest-repack', 'a' * 64)]]
+        self.assertEqual([5, 5, 4, 3], [p['identity']['versionCode'] for p in registered_window(profiles)])
+
     def test_cache_is_rehashed_and_corruption_is_rejected(self):
         with tempfile.TemporaryDirectory() as root:
             digest = hashlib.sha256(b'apk').hexdigest()

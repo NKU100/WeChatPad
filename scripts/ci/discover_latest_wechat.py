@@ -107,11 +107,12 @@ def fetch_official_page() -> str:
 def expected_sha256_for_url(targets_path: Path, source_url: str) -> str:
     targets = json.loads(targets_path.read_text(encoding="utf-8"))
     matches = [target for target in targets if target.get("sourceUrl") == source_url]
-    if len(matches) > 1:
-        raise ValueError("Multiple compatibility profiles register the discovered APK URL")
     if not matches:
         return ""
-    expected = matches[0]["identity"].get("apkSha256", "").lower()
+    digests = {target["identity"].get("apkSha256", "").lower() for target in matches}
+    if len(digests) > 1:
+        return ""
+    expected = next(iter(digests))
     if not re.fullmatch(r"[a-f0-9]{64}", expected):
         raise ValueError("Registered APK URL has an invalid SHA-256 digest")
     return expected

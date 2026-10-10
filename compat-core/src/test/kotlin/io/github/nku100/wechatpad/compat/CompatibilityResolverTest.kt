@@ -140,6 +140,33 @@ class CompatibilityResolverTest {
     }
 
     @Test
+    fun selectsExactDigestAmongSameVersionVariantsAndRejectsMissingOrUnknownDigest() {
+        val repackIdentity = REGISTERED_IDENTITY.copy(apkSha256 = "b".repeat(64))
+        val targets = listOf(target(), target(identity = repackIdentity))
+        val normalized = resolveCandidate(REGISTERED_IDENTITY.copy(apkSha256 = "A".repeat(64)), targets)
+        assertEquals(CompatibilityStatus.COMPATIBLE, normalized.status)
+
+        assertRejected(
+            resolveCandidate(REGISTERED_IDENTITY.copy(apkSha256 = WRONG_SHA256), targets),
+            CompatibilityStatus.UNKNOWN_BUILD,
+        )
+        assertRejected(
+            resolveCandidate(REGISTERED_IDENTITY.copy(apkSha256 = null), targets),
+            CompatibilityStatus.UNKNOWN_BUILD,
+        )
+        assertRejected(
+            CompatibilityResolver.resolve(
+                identity = REGISTERED_IDENTITY.copy(apkSha256 = null),
+                verification = IdentityVerification.INSTALLED_PACKAGE,
+                targets = targets,
+                facts = validFacts(),
+                requiredHookIds = setOf("tablet", "login"),
+            ),
+            CompatibilityStatus.IDENTITY_MISMATCH,
+        )
+    }
+
+    @Test
     fun rejectsAnUnknownVersion() {
         val result = resolve(
             identity = REGISTERED_IDENTITY.copy(versionName = "9.0.0", versionCode = 9000),

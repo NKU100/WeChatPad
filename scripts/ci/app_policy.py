@@ -98,9 +98,10 @@ def validate_targets(targets: list[dict], app_id: Optional[str] = None) -> AppPo
         hook_ids = [hook.get("id") for hook in target.get("hooks", [])]
         if len(hook_ids) != len(policy.required_hook_ids) or set(hook_ids) != set(policy.required_hook_ids):
             raise ValueError("Compatibility target hooks do not match app policy")
-        key = (identity.get("packageName"), identity.get("abi"), identity.get("versionCode"))
+        key = (identity.get("packageName"), identity.get("abi"), identity.get("versionCode"),
+               identity["apkSha256"].lower())
         if key in seen:
-            raise ValueError("Duplicate package, ABI, and versionCode in compatibility policy")
+            raise ValueError("Duplicate compatibility profile identity")
         seen.add(key)
         source_url = target.get("sourceUrl", "")
         prefix = urlsplit(policy.official_apk_prefix)

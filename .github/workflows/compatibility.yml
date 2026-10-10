@@ -25,6 +25,10 @@ on:
         description: Registered application policy to check
         type: string
         default: wechat
+      baseline_apk_sha256:
+        description: Select a runtime-verified baseline variant when the preferred version is ambiguous
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -228,7 +232,7 @@ jobs:
           mkdir -p ".cache/${APP_ID}-apks" compatibility-report
           printf '# WeChat %s (%s) compatibility check\n\nExpected APK SHA-256: %s\n\n' \
             "$WECHAT_VERSION" "$WECHAT_VERSION_CODE" "$WECHAT_APK_SHA256" \
-            > "compatibility-report/$WECHAT_VERSION.md"
+            > "compatibility-report/$WECHAT_VERSION-$WECHAT_VERSION_CODE-$WECHAT_APK_SHA256.md"
 
       - name: Restore APK by SHA-256
         uses: actions/cache@v6
@@ -239,6 +243,7 @@ jobs:
       - name: Download and verify official APK
         env:
           WECHAT_VERSION: ${{ matrix.target.version_name }}
+          WECHAT_VERSION_CODE: ${{ matrix.target.version_code }}
           WECHAT_APK_SHA256: ${{ matrix.target.sha256 }}
           WECHAT_APK_URL: ${{ matrix.target.source_url }}
         shell: bash
@@ -247,7 +252,7 @@ jobs:
 
           apk_path=".cache/${{ matrix.target.app_id }}-apks/$WECHAT_APK_SHA256.apk"
           mkdir -p "$(dirname "$apk_path")"
-          report="compatibility-report/$WECHAT_VERSION.md"
+          report="compatibility-report/$WECHAT_VERSION-$WECHAT_VERSION_CODE-$WECHAT_APK_SHA256.md"
           printf 'Source: %s\n\n' "$WECHAT_APK_URL" >> "$report"
 
           if [[ -f "$apk_path" ]] && printf '%s  %s\n' "$WECHAT_APK_SHA256" "$apk_path" | sha256sum --check --status; then
@@ -280,12 +285,13 @@ jobs:
         continue-on-error: true
         env:
           WECHAT_VERSION: ${{ matrix.target.version_name }}
+          WECHAT_VERSION_CODE: ${{ matrix.target.version_code }}
           WECHAT_APK_SHA256: ${{ matrix.target.sha256 }}
         shell: bash
         run: |
           set -uo pipefail
 
-          report="compatibility-report/$WECHAT_VERSION.md"
+          report="compatibility-report/$WECHAT_VERSION-$WECHAT_VERSION_CODE-$WECHAT_APK_SHA256.md"
           apk_path=".cache/${{ matrix.target.app_id }}-apks/$WECHAT_APK_SHA256.apk"
           printf '\n## Shared compat-core result\n\n' >> "$report"
 
@@ -307,8 +313,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.target.artifact_prefix }}-${{ matrix.target.app_id }}-${{ matrix.target.package_name }}-${{ matrix.target.abi }}-compatibility-${{ matrix.target.version_name }}
-          path: compatibility-report/${{ matrix.target.version_name }}.md
+          name: ${{ matrix.target.artifact_prefix }}-${{ matrix.target.app_id }}-${{ matrix.target.package_name }}-${{ matrix.target.abi }}-compatibility-${{ matrix.target.version_name }}-${{ matrix.target.version_code }}-${{ matrix.target.sha256 }}
+          path: compatibility-report/${{ matrix.target.version_name }}-${{ matrix.target.version_code }}-${{ matrix.target.sha256 }}.md
           if-no-files-found: warn
           retention-days: 14
 
@@ -400,7 +406,7 @@ jobs:
           fi
 
           ./gradlew --no-daemon :compat-checker:run \
-            --args="analyze-candidate --app-id $APP_ID --targets $TARGETS_PATH --apk '$WECHAT_APK_PATH' --source-url '$WECHAT_APK_URL' --checked-versions '$checked_versions' --regression-passed '$WECHAT_REGRESSION_PASSED' --profile-merged-to-main '$profile_merged_to_main' --report compatibility-report/candidate-report.json" \
+            --args="analyze-candidate --app-id $APP_ID --targets $TARGETS_PATH --apk '$WECHAT_APK_PATH' --source-url '$WECHAT_APK_URL' --checked-versions '$checked_versions' --regression-passed '$WECHAT_REGRESSION_PASSED' --profile-merged-to-main '$profile_merged_to_main' --baseline-apk-sha256 '${{ inputs.baseline_apk_sha256 || '' }}' --report compatibility-report/candidate-report.json" \
             2>&1 | tee -a compatibility-report/latest-official.md
 
       - name: Determine whether Codex should adapt this build
@@ -610,19 +616,13 @@ jobs:
           path: ${{ needs.prepare.outputs.cache_dir }}
           key: ${{ needs.prepare.outputs.cache_key }}
 
-      - name: Restore first regression APK
-        if: steps.claim.outputs.claimed == 'true' && fromJSON(needs.prepare.outputs.targets)[0] != null
+      - name: Restore regression APK cache
+        if: steps.claim.outputs.claimed == 'true'
         uses: actions/cache@v6
         with:
-          path: .cache/${{ needs.prepare.outputs.app_id }}-apks/${{ fromJSON(needs.prepare.outputs.targets)[0].sha256 }}.apk
-          key: ${{ fromJSON(needs.prepare.outputs.targets)[0].artifact_prefix }}-${{ fromJSON(needs.prepare.outputs.targets)[0].app_id }}-${{ fromJSON(needs.prepare.outputs.targets)[0].package_name }}-${{ fromJSON(needs.prepare.outputs.targets)[0].abi }}-apk-${{ fromJSON(needs.prepare.outputs.targets)[0].sha256 }}
-
-      - name: Restore second regression APK
-        if: steps.claim.outputs.claimed == 'true' && fromJSON(needs.prepare.outputs.targets)[1] != null
-        uses: actions/cache@v6
-        with:
-          path: .cache/${{ needs.prepare.outputs.app_id }}-apks/${{ fromJSON(needs.prepare.outputs.targets)[1].sha256 }}.apk
-          key: ${{ fromJSON(needs.prepare.outputs.targets)[1].artifact_prefix }}-${{ fromJSON(needs.prepare.outputs.targets)[1].app_id }}-${{ fromJSON(needs.prepare.outputs.targets)[1].package_name }}-${{ fromJSON(needs.prepare.outputs.targets)[1].abi }}-apk-${{ fromJSON(needs.prepare.outputs.targets)[1].sha256 }}
+          path: .cache/${{ needs.prepare.outputs.app_id }}-apks
+          key: wechatpad-${{ needs.prepare.outputs.app_id }}-regression-${{ hashFiles(needs.prepare.outputs.targets_path) }}
+          restore-keys: wechatpad-${{ needs.prepare.outputs.app_id }}-regression-
 
       - name: Revalidate candidate cache and prepare isolated checkout
         if: steps.claim.outputs.claimed == 'true'
@@ -671,7 +671,8 @@ jobs:
         run: |
           mkdir -p work/runtime-smoke/evidence work/runtime-smoke/module
           cp app/build/outputs/apk/debug/app-debug.apk work/runtime-smoke/module/app-debug.apk
-          cp "$CODEX_TASK_DIR/checkout/work/apks/candidate.apk" "work/runtime-smoke/${APP_ID}.apk"
+          candidate_sha256="$(jq -r .identity.apkSha256 "$CODEX_TASK_DIR/checkout/work/analysis/candidate-report.json")"
+          cp "$CODEX_TASK_DIR/checkout/work/apks/candidate-${candidate_sha256}.apk" "work/runtime-smoke/${APP_ID}.apk"
           gh release download experimental-ramdisk-api37.2-r06-magisk31.0 \
             --pattern ramdisk37-patched.img --pattern LSPosed-v2.2.1-7912-release.zip --dir work/runtime-smoke
           echo 'b49fec2e291582495196d9437bf520f337882bddf763d2530a576f3e4da99df8  work/runtime-smoke/ramdisk37-patched.img' | sha256sum --check
@@ -746,7 +747,9 @@ jobs:
           destination = Path('runtime-inputs')
           destination.mkdir()
           shutil.copyfile(checkout / 'app/build/outputs/apk/debug/app-debug.apk', destination / 'app-debug.apk')
-          shutil.copyfile(checkout / 'work/apks/candidate.apk', destination / f"{os.environ['APP_ID']}.apk")
+          report = json.loads((checkout / 'work/analysis/candidate-report.json').read_text())
+          digest = report['identity']['apkSha256']
+          shutil.copyfile(checkout / 'work/apks' / f'candidate-{digest}.apk', destination / f"{os.environ['APP_ID']}-{digest}.apk")
           shutil.copyfile(task / 'candidate-report.json', destination / 'candidate-report.json')
           PYEXPORT
 
@@ -765,7 +768,7 @@ jobs:
         with:
           name: ${{ needs.prepare.outputs.artifact_prefix }}-${{ needs.prepare.outputs.app_id }}-runtime-candidate
           path: |
-            runtime-inputs/${{ needs.prepare.outputs.app_id }}.apk
+            runtime-inputs/${{ needs.prepare.outputs.app_id }}-*.apk
             runtime-inputs/candidate-report.json
           if-no-files-found: error
           retention-days: 7
