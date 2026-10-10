@@ -6,7 +6,7 @@ import hashlib
 import json
 import tempfile
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from scripts.ci.candidate_selection import replay_report, main
 
@@ -50,6 +50,67 @@ class CandidateSelectionTest(unittest.TestCase):
             manifest.write_text(json.dumps([self.profile]))
             with patch('sys.argv', ['candidate_selection', '--targets', str(manifest), '--directory', str(root / 'inputs')]), patch('scripts.ci.apps.wechat.discovery_policy.fetch_official_page', return_value=latest):
                 with self.assertRaisesRegex(ValueError, 'Latest official APK is not runtime-verified'):
+                    main()
+            self.assertFalse((root / 'inputs/wechat.apk').exists())
+
+    def test_registered_mode_selects_highest_runtime_verified_profile_without_discovery(self):
+        newer = copy.deepcopy(self.profile)
+        newer['identity'].update(versionName='8.0.79', versionCode=3190)
+        newer['sourceUrl'] = 'https://dldir1v6.qq.com/weixin/android/weixin8079android3190_arm64.apk'
+        static_newest = copy.deepcopy(newer)
+        static_newest['identity'].update(versionName='8.0.80', versionCode=3200)
+        static_newest['sourceUrl'] = 'https://dldir1v6.qq.com/weixin/android/weixin8080android3200_arm64.apk'
+        static_newest['verificationStatus'] = 'static-verified'
+        body = b'cached official registered artifact'
+        digest = hashlib.sha256(body).hexdigest()
+        newer['identity']['apkSha256'] = digest
+        static_newest['identity']['apkSha256'] = digest
+        remote = {'content_length': len(body), 'last_modified': 'Wed, 07 Oct 2026 00:00:00 GMT', 'etag': ''}
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = root / 'targets.json'
+            original_targets = [self.profile, newer, static_newest]
+            manifest.write_text(json.dumps(original_targets))
+            cache = root / 'inputs/cache'
+            cache.mkdir(parents=True)
+            (cache / f'{digest}.apk').write_bytes(body)
+            (cache / 'candidate.json').write_text(json.dumps(dict(remote, url=newer['sourceUrl'], sha256=digest)))
+            with patch('sys.argv', ['candidate_selection', '--mode', 'registered', '--targets', str(manifest), '--directory', str(root / 'inputs')]), patch('scripts.ci.apps.wechat.discovery_policy.discover', side_effect=AssertionError('discovery must not run')), patch('scripts.ci.candidate_selection.remote_metadata', return_value=remote):
+                main()
+            report = json.loads((root / 'inputs/candidate-report.json').read_text())
+            self.assertEqual(report['selectionMode'], 'registered')
+            self.assertEqual(report['identity']['versionCode'], 3190)
+            self.assertEqual(report['identity']['apkSha256'], digest)
+            self.assertEqual((root / 'inputs/wechat.apk').read_bytes(), body)
+            self.assertEqual(json.loads(manifest.read_text()), original_targets)
+
+    def test_registered_mode_rejects_static_only_policy(self):
+        profile = copy.deepcopy(self.profile)
+        profile['verificationStatus'] = 'static-verified'
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = root / 'targets.json'
+            manifest.write_text(json.dumps([profile]))
+            with patch('sys.argv', ['candidate_selection', '--mode', 'registered', '--targets', str(manifest), '--directory', str(root / 'inputs')]), patch('scripts.ci.apps.wechat.discovery_policy.discover', side_effect=AssertionError('discovery must not run')):
+                with self.assertRaisesRegex(ValueError, 'No runtime-verified registered APK'):
+                    main()
+
+    def test_registered_mode_rejects_download_with_wrong_digest(self):
+        profile = copy.deepcopy(self.profile)
+        body = b'APK bytes that do not match the registered digest'
+        headers = {'Content-Length': str(len(body)), 'Last-Modified': 'Wed, 07 Oct 2026 00:00:00 GMT', 'ETag': ''}
+        response = Mock(status=200, headers=Mock(get=Mock(side_effect=lambda key, default=None: headers.get(key, default))), geturl=lambda: profile['sourceUrl'])
+        response.read.side_effect = [body, b'']
+        context = Mock()
+        context.__enter__ = Mock(return_value=response)
+        context.__exit__ = Mock(return_value=False)
+        remote = {'content_length': len(body), 'last_modified': headers['Last-Modified'], 'etag': ''}
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = root / 'targets.json'
+            manifest.write_text(json.dumps([profile]))
+            with patch('sys.argv', ['candidate_selection', '--mode', 'registered', '--targets', str(manifest), '--directory', str(root / 'inputs')]), patch('scripts.ci.apps.wechat.discovery_policy.discover', side_effect=AssertionError('discovery must not run')), patch('scripts.ci.candidate_selection.remote_metadata', return_value=remote), patch('scripts.ci.fetch_latest_wechat_apk.urlopen', return_value=context):
+                with self.assertRaisesRegex(ValueError, 'APK SHA-256 mismatch'):
                     main()
             self.assertFalse((root / 'inputs/wechat.apk').exists())
 

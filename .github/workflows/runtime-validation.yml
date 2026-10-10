@@ -11,6 +11,13 @@ on:
         description: Registered application policy to replay
         type: string
         default: wechat
+      candidate_mode:
+        description: Select the latest official APK or the newest runtime-verified registered APK
+        type: choice
+        options:
+          - latest
+          - registered
+        default: latest
 
 permissions:
   contents: read
@@ -25,6 +32,7 @@ jobs:
       artifact_prefix: ${{ steps.policy.outputs.artifact_prefix }}
     env:
       APP_ID: ${{ inputs.app_id || 'wechat' }}
+      CANDIDATE_MODE: ${{ inputs.candidate_mode || 'latest' }}
     steps:
       - uses: actions/checkout@v7
       - name: Resolve trusted application policy
@@ -44,6 +52,7 @@ jobs:
         run: |
           python3 -m scripts.ci.candidate_selection \
             --app-id "$APP_ID" \
+            --mode "$CANDIDATE_MODE" \
             --targets "$TARGETS_PATH" \
             --directory runtime-inputs
       - name: Check real APK and build replay module
@@ -101,12 +110,17 @@ jobs:
           from pathlib import Path
           from scripts.ci.runtime_task import runtime_result
           directory = Path('runtime-result')
+          candidate = json.loads((directory / 'candidate-report.json').read_text())
           evidence = directory / 'evidence/runtime-smoke/evidence/smoke-report.json'
           smoke = json.loads(evidence.read_text()) if evidence.is_file() else {}
-          report = runtime_result(json.loads((directory / 'candidate-report.json').read_text()), smoke, os.environ['SMOKE_CONCLUSION'], os.environ['APP_ID'])
+          report = runtime_result(candidate, smoke, os.environ['SMOKE_CONCLUSION'], os.environ['APP_ID'])
           (directory / 'runtime-candidate-report.json').write_text(json.dumps(report, indent=2) + '\n')
           with Path(os.environ['GITHUB_STEP_SUMMARY']).open('a') as summary:
-              summary.write(f'## Replay result\n\n`{report["status"]}`\n\nNo Codex invocation, PR or formal support update.\n')
+              identity = candidate['identity']
+              summary.write(f'## Replay result\n\n`{report["status"]}`\n\n')
+              summary.write(f'selectedMode: `{candidate["selectionMode"]}`\n\n')
+              summary.write(f'Candidate: `{identity["versionName"]}` (`{identity["versionCode"]}`), APK SHA-256 `{identity["apkSha256"]}`\n\n')
+              summary.write('No Codex invocation, PR or formal support update.\n')
           assert report['status'] == 'RUNTIME_VERIFIED', report
           PY
       - uses: actions/upload-artifact@v7
